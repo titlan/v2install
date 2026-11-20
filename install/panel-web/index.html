@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel MUSTAFA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --accent: #22d3ee;
+    --accent2: #3b82f6;
+    --green: #22c55e;
+    --red: #ef4444;
+    --amber: #f59e0b;
+    --text: #eef2ff;
+    --muted: #94a3b8;
+  }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    color: var(--text);
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 45%, #0c4a6e 100%);
+    background-attachment: fixed;
+    padding: 12px;
+  }
+  h1 { font-size: 1.4rem; letter-spacing: 1px; }
+  h2 { font-size: 1.05rem; margin-bottom: 10px; }
+  h3 { font-size: 0.95rem; margin-bottom: 6px; }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  /* Tarjetas de cristal */
+  .glass {
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 18px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  header.glass {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap;
+  }
+  header .brand { display: flex; align-items: center; gap: 10px; }
+  header .logo {
+    width: 38px; height: 38px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 1.1rem; color: #082f49;
+  }
+  header small { color: var(--muted); display: block; font-size: 0.75rem; }
+  /* Pestañas */
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tab {
+    flex: 1 1 auto; min-width: 100px;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: var(--text); border-radius: 14px;
+    padding: 11px 8px; font-size: 0.9rem; cursor: pointer;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .tab.active {
+    background: linear-gradient(135deg, rgba(34,211,238,.35), rgba(59,130,246,.35));
+    border-color: var(--accent);
+  }
+  /* Botones */
+  button {
+    font-family: inherit; cursor: pointer; border: none; border-radius: 12px;
+    padding: 9px 14px; font-size: 0.9rem; color: #082f49;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    font-weight: 600;
+  }
+  button:disabled { opacity: .5; cursor: wait; }
+  button.ghost {
+    background: rgba(255,255,255,.10); color: var(--text);
+    border: 1px solid rgba(255,255,255,.22);
+  }
+  button.danger { background: linear-gradient(135deg, #f87171, #dc2626); color: #fff; }
+  button.warn { background: linear-gradient(135deg, #fbbf24, #d97706); color: #451a03; }
+  button.small { padding: 6px 10px; font-size: 0.8rem; border-radius: 9px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  /* Formularios */
+  input, select {
+    font-family: inherit; font-size: 0.95rem; color: var(--text);
+    background: rgba(0,0,0,.30); border: 1px solid rgba(255,255,255,.22);
+    border-radius: 11px; padding: 10px 12px; width: 100%;
+  }
+  select option { color: #111; }
+  label { font-size: 0.8rem; color: var(--muted); display: block; margin: 8px 0 4px; }
+  form .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+  form .grid .full { grid-column: 1 / -1; }
+  /* Estadísticas */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .stat { text-align: center; padding: 14px 8px; }
+  .stat b { display: block; font-size: 1.5rem; }
+  .stat span { font-size: 0.78rem; color: var(--muted); }
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 700;
+  }
+  .badge.on { background: rgba(34,197,94,.25); color: #86efac; border: 1px solid rgba(34,197,94,.5); }
+  .badge.off { background: rgba(239,68,68,.22); color: #fca5a5; border: 1px solid rgba(239,68,68,.5); }
+  .badge.absent { background: rgba(148,163,184,.2); color: #cbd5e1; border: 1px solid rgba(148,163,184,.4); }
+  .badge.proto { background: rgba(34,211,238,.18); color: #67e8f9; border: 1px solid rgba(34,211,238,.4); }
+  /* Tablas */
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th, td { padding: 8px 6px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.10); }
+  th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: .5px; }
+  .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.78rem; word-break: break-all; }
+  .linkbox {
+    background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.14);
+    border-radius: 10px; padding: 8px 10px; margin: 6px 0;
+    display: flex; gap: 8px; align-items: flex-start;
+  }
+  .linkbox code { flex: 1; }
+  /* Grid de protocolos */
+  .proto-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .proto-card h3 { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .proto-card p { color: var(--muted); font-size: 0.82rem; margin: 4px 0 10px; }
+  /* Salida de comandos */
+  pre {
+    background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.14);
+    border-radius: 12px; padding: 12px; font-size: 0.78rem;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 320px; overflow-y: auto; margin-top: 10px;
+  }
+  .hidden { display: none !important; }
+  .muted { color: var(--muted); font-size: 0.85rem; }
+  #toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: rgba(15,23,42,.95); border: 1px solid var(--accent);
+    color: var(--text); padding: 12px 18px; border-radius: 14px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.5); max-width: 92vw; z-index: 50;
+    font-size: 0.9rem;
+  }
+  #toast.error { border-color: var(--red); }
+  #toast.ok { border-color: var(--green); }
+  .login-box { max-width: 420px; margin: 18vh auto 0; text-align: center; }
+  .login-box .logo {
+    width: 64px; height: 64px; border-radius: 18px; margin: 0 auto 14px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 1.6rem; color: #082f49;
+  }
+  .spinner { color: var(--muted); text-align: center; padding: 20px 0; }
+  @media (max-width: 560px) {
+    form .grid { grid-template-columns: 1fr; }
+    .tab { min-width: 0; font-size: 0.82rem; padding: 10px 4px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ LOGIN ============ -->
+  <div id="loginView" class="login-box glass hidden">
+    <div class="logo">M</div>
+    <h1>Panel MUSTAFA</h1>
+    <p class="muted" style="margin:6px 0 16px">Escribe la contraseña del panel para entrar.</p>
+    <form id="loginForm">
+      <label for="loginPass" style="text-align:left">Contraseña</label>
+      <input id="loginPass" type="password" autocomplete="current-password" required>
+      <div style="height:12px"></div>
+      <button type="submit" style="width:100%">Entrar</button>
+    </form>
+    <p id="loginError" class="muted" style="margin-top:12px;color:#fca5a5"></p>
+  </div>
+
+  <!-- ============ APP ============ -->
+  <div id="appView" class="hidden">
+    <header class="glass">
+      <div class="brand">
+        <div class="logo">M</div>
+        <div>
+          <h1>Panel MUSTAFA</h1>
+          <small id="hostLine">—</small>
+        </div>
+      </div>
+      <div class="row">
+        <button class="ghost small" id="btnLogout">Salir</button>
+      </div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="ssh">SSH</button>
+      <button class="tab" data-tab="v2ray">V2Ray</button>
+      <button class="tab" data-tab="protocolos">Protocolos</button>
+      <button class="tab" data-tab="herramientas">Herramientas</button>
+    </nav>
+
+    <!-- DASHBOARD -->
+    <section id="tab-dashboard" class="tabpage">
+      <div class="glass">
+        <h2>Estado del VPS</h2>
+        <div class="stats" id="dashStats"><div class="spinner">Cargando…</div></div>
+      </div>
+      <div class="glass">
+        <h2>Servicios</h2>
+        <div id="dashServices"><div class="spinner">Cargando…</div></div>
+        <div class="row" style="margin-top:12px">
+          <button class="ghost" id="btnRefreshDash">Actualizar</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SSH -->
+    <section id="tab-ssh" class="tabpage hidden">
+      <div class="glass">
+        <h2>Crear usuario SSH</h2>
+        <form id="sshCreateForm">
+          <div class="grid">
+            <div>
+              <label for="sshUser">Nombre de usuario</label>
+              <input id="sshUser" required pattern="[a-z_][a-z0-9_-]{0,31}"
+                     title="Minúsculas, sin espacios, empieza con letra" placeholder="ej. juan">
+            </div>
+            <div>
+              <label for="sshDays">Días de vigencia</label>
+              <input id="sshDays" type="number" min="1" max="3650" value="30">
+            </div>
+            <div class="full">
+              <label for="sshPass">Contraseña (vacía = aleatoria)</label>
+              <input id="sshPass" type="text" autocomplete="off" placeholder="(vacía = aleatoria)">
+            </div>
+            <div class="full"><button type="submit" style="width:100%">Crear usuario</button></div>
+          </div>
+        </form>
+        <div id="sshCreated" class="hidden" style="margin-top:12px"></div>
+      </div>
+      <div class="glass">
+        <h2>Usuarios SSH</h2>
+        <div class="row" style="margin-bottom:10px">
+          <button class="ghost small" id="btnRefreshSsh">Actualizar lista</button>
+        </div>
+        <div id="sshTableWrap"><div class="spinner">Cargando…</div></div>
+      </div>
+    </section>
+
+    <!-- V2RAY -->
+    <section id="tab-v2ray" class="tabpage hidden">
+      <div class="glass">
+        <h2>V2Ray / Xray <span id="v2rayStatusLine" class="muted"></span></h2>
+        <div class="row">
+          <button class="ghost small" id="btnV2rayRestart">Reiniciar Xray</button>
+          <button class="ghost small" id="btnRefreshV2ray">Actualizar</button>
+        </div>
+      </div>
+      <div class="glass">
+        <h2>Agregar usuario UUID</h2>
+        <form id="v2rayAddForm" class="row">
+          <select id="v2rayProto" style="flex:1;min-width:180px">
+            <option value="todos">Todos (Reality + WebSocket + XHTTP)</option>
+            <option value="reality">Solo Reality</option>
+            <option value="ws">Solo WebSocket</option>
+            <option value="xhttp">Solo XHTTP</option>
+          </select>
+          <button type="submit">Agregar usuario</button>
+        </form>
+        <div id="v2rayAdded" class="hidden" style="margin-top:12px"></div>
+      </div>
+      <div class="glass">
+        <h2>Cuentas y enlaces</h2>
+        <div id="v2rayList"><div class="spinner">Cargando…</div></div>
+      </div>
+    </section>
+
+    <!-- PROTOCOLOS -->
+    <section id="tab-protocolos" class="tabpage hidden">
+      <div class="glass">
+        <h2>Instalar protocolos</h2>
+        <p class="muted">Instala o quita cada protocolo. El puerto se puede cambiar al instalar.</p>
+        <div class="row" style="margin-top:10px">
+          <button class="ghost small" id="btnRefreshProto">Actualizar</button>
+        </div>
+      </div>
+      <div class="proto-grid" id="protoGrid"><div class="glass"><div class="spinner">Cargando…</div></div></div>
+      <div class="glass hidden" id="protoOutputBox">
+        <h2>Salida del instalador <button class="ghost small" id="btnCloseOutput" style="float:right">Cerrar</button></h2>
+        <pre id="protoOutput"></pre>
+      </div>
+    </section>
+
+    <!-- HERRAMIENTAS -->
+    <section id="tab-herramientas" class="tabpage hidden">
+      <div class="glass">
+        <h2>Herramientas</h2>
+        <div class="stats" id="toolsStats"><div class="spinner">Cargando…</div></div>
+        <div class="row" style="margin-top:14px">
+          <button id="btnBackup">Crear respaldo ahora</button>
+          <button class="ghost" id="btnTraffic">Ver tráfico</button>
+          <button class="ghost" id="btnBans">Ver baneos</button>
+          <button class="ghost" id="btnRefreshTools">Actualizar</button>
+        </div>
+        <pre id="toolsOutput" class="hidden"></pre>
+      </div>
+      <div class="glass">
+        <h2>Panel web</h2>
+        <form id="changePassForm">
+          <label for="newPanelPass">Nueva contraseña del panel (mín. 4 caracteres)</label>
+          <input id="newPanelPass" type="password" required minlength="4" autocomplete="new-password">
+          <div style="height:10px"></div>
+          <div class="row">
+            <button type="submit">Cambiar contraseña</button>
+            <button type="button" class="warn" id="btnRestartPanel">Reiniciar panel</button>
+          </div>
+        </form>
+        <p class="muted" style="margin-top:10px">Al reiniciar el panel se cierra esta sesión y hay que volver a entrar.</p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+let toastTimer = null;
+
+function toast(msg, kind) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.className = kind || "";
+  t.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add("hidden"), 4500);
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({
+    headers: { "Content-Type": "application/json" },
+  }, opts || {}));
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (res.status === 401) { showLogin(); throw new Error("Sesión caducada. Vuelve a entrar."); }
+  if (!res.ok) throw new Error((data && data.error) || ("Error HTTP " + res.status));
+  return data;
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function badge(state) {
+  if (state === "on") return '<span class="badge on">ON</span>';
+  if (state === "off") return '<span class="badge off">OFF</span>';
+  return '<span class="badge absent">--</span>';
+}
+
+function copyText(text, btn) {
+  const done = () => { if (btn) { const old = btn.textContent; btn.textContent = "Copiado ✓"; setTimeout(() => btn.textContent = old, 1500); } };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); done(); } catch (e) { toast("No se pudo copiar.", "error"); }
+  document.body.removeChild(ta);
+}
+
+function linkRow(label, value) {
+  return '<div class="linkbox"><code class="mono"><b>' + esc(label) + ':</b> ' + esc(value) +
+    '</code><button class="ghost small" onclick="copyText(' + JSON.stringify(value).replace(/"/g, "&quot;") +
+    ', this)">Copiar</button></div>';
+}
+
+// ---- Vistas ----
+function showLogin() {
+  $("#loginView").classList.remove("hidden");
+  $("#appView").classList.add("hidden");
+}
+function showApp() {
+  $("#loginView").classList.add("hidden");
+  $("#appView").classList.remove("hidden");
+}
+
+function switchTab(name) {
+  $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  $$(".tabpage").forEach(p => p.classList.add("hidden"));
+  $("#tab-" + name).classList.remove("hidden");
+  if (name === "dashboard") loadDashboard();
+  if (name === "ssh") loadSshUsers();
+  if (name === "v2ray") loadV2ray();
+  if (name === "protocolos") loadProtocols();
+  if (name === "herramientas") loadTools();
+}
+$("#tabs").addEventListener("click", (e) => {
+  const b = e.target.closest(".tab");
+  if (b) switchTab(b.dataset.tab);
+});
+
+// ---- Login / logout ----
+$("#loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#loginError").textContent = "";
+  try {
+    await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#loginPass").value }) });
+    $("#loginPass").value = "";
+    showApp();
+    loadDashboard();
+    toast("Bienvenido al panel.", "ok");
+  } catch (err) { $("#loginError").textContent = err.message; }
+});
+$("#btnLogout").addEventListener("click", async () => {
+  try { await api("/api/logout", { method: "POST" }); } catch (e) {}
+  showLogin();
+});
+
+// ---- Dashboard ----
+async function loadDashboard() {
+  try {
+    const s = await api("/api/status");
+    $("#hostLine").textContent = (s.domain || "sin dominio") + " · " + (s.ipv4 || "");
+    $("#dashStats").innerHTML =
+      statCard(s.users_total, "usuarios SSH") +
+      statCard(s.users_connected, "conectados") +
+      statCard(esc(s.uptime), "encendido") +
+      statCard(esc(s.domain), "dominio");
+    const sv = s.services;
+    $("#dashServices").innerHTML =
+      serviceRow("Nginx", sv.nginx) + serviceRow("Xray (V2Ray)", sv.xray) +
+      serviceRow("CheckUser", sv.checkuser) +
+      serviceRow("CheckUser HTTPS :8443", s.https8443) +
+      serviceRow("Panel web", sv.panel);
+  } catch (err) { $("#dashStats").innerHTML = '<p class="muted">' + esc(err.message) + "</p>"; }
+}
+function statCard(value, label) {
+  return '<div class="glass stat" style="margin:0"><b>' + value + '</b><span>' + esc(label) + "</span></div>";
+}
+function serviceRow(name, state) {
+  return '<div class="row" style="justify-content:space-between;padding:7px 2px;border-bottom:1px solid rgba(255,255,255,.08)">' +
+    "<span>" + esc(name) + "</span>" + badge(state) + "</div>";
+}
+$("#btnRefreshDash").addEventListener("click", loadDashboard);
+
+// ---- SSH ----
+async function loadSshUsers() {
+  const wrap = $("#sshTableWrap");
+  try {
+    const users = await api("/api/ssh/users");
+    if (!users.length) { wrap.innerHTML = '<p class="muted">(sin usuarios SSH creados)</p>'; return; }
+    let html = '<table><thead><tr><th>Usuario</th><th>Vence</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
+    for (const u of users) {
+      const estado = u.locked ? '<span class="badge off">Bloqueado</span>' : '<span class="badge on">Activo</span>';
+      const conn = u.connected ? ' <span class="badge proto">Conectado</span>' : "";
+      html += "<tr><td><b>" + esc(u.user) + "</b>" + conn + "</td><td>" + esc(u.expiry) + "</td><td>" + estado + "</td><td><div class=\"row\">" +
+        '<button class="ghost small" onclick="sshLock(\'' + esc(u.user) + "', " + (u.locked ? "'unlock'" : "'lock'") + ')">' + (u.locked ? "Desbloquear" : "Bloquear") + "</button>" +
+        '<button class="ghost small" onclick="sshRenew(\'' + esc(u.user) + "')\">Renovar</button>" +
+        '<button class="ghost small" onclick="sshPass(\'' + esc(u.user) + "')\">Clave</button>" +
+        '<button class="danger small" onclick="sshDel(\'' + esc(u.user) + "')\">Borrar</button>" +
+        "</div></td></tr>";
+    }
+    wrap.innerHTML = html + "</tbody></table>";
+  } catch (err) { wrap.innerHTML = '<p class="muted">' + esc(err.message) + "</p>"; }
+}
+$("#btnRefreshSsh").addEventListener("click", loadSshUsers);
+
+$("#sshCreateForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector("button[type=submit]");
+  btn.disabled = true;
+  try {
+    const r = await api("/api/ssh/create", { method: "POST", body: JSON.stringify({
+      user: $("#sshUser").value.trim(),
+      password: $("#sshPass").value,
+      days: parseInt($("#sshDays").value, 10) || 30,
+    })});
+    $("#sshCreated").classList.remove("hidden");
+    $("#sshCreated").innerHTML = '<div class="linkbox"><code class="mono">Usuario: <b>' + esc(r.user) + "</b> · Contraseña: <b>" + esc(r.password) + "</b> · Vence: " + esc(r.expiry) + "</code></div>";
+    $("#sshUser").value = ""; $("#sshPass").value = "";
+    toast("Usuario " + r.user + " creado.", "ok");
+    loadSshUsers();
+  } catch (err) { toast(err.message, "error"); }
+  btn.disabled = false;
+});
+
+async function sshLock(user, action) {
+  try {
+    await api("/api/ssh/lock", { method: "POST", body: JSON.stringify({ user, action }) });
+    toast(action === "lock" ? "Usuario bloqueado." : "Usuario desbloqueado.", "ok");
+    loadSshUsers();
+  } catch (err) { toast(err.message, "error"); }
+}
+async function sshDel(user) {
+  if (!confirm("¿Borrar el usuario '" + user + "' y su carpeta?")) return;
+  try {
+    await api("/api/ssh/delete", { method: "POST", body: JSON.stringify({ user }) });
+    toast("Usuario borrado.", "ok");
+    loadSshUsers();
+  } catch (err) { toast(err.message, "error"); }
+}
+async function sshRenew(user) {
+  const days = prompt("¿Cuántos días agregas al usuario '" + user + "'?", "30");
+  if (days === null) return;
+  try {
+    const r = await api("/api/ssh/renew", { method: "POST", body: JSON.stringify({ user, days: parseInt(days, 10) }) });
+    toast("Ahora vence: " + r.expiry, "ok");
+    loadSshUsers();
+  } catch (err) { toast(err.message, "error"); }
+}
+async function sshPass(user) {
+  const pw = prompt("Nueva contraseña para '" + user + "' (vacía = aleatoria):", "");
+  if (pw === null) return;
+  try {
+    const r = await api("/api/ssh/password", { method: "POST", body: JSON.stringify({ user, password: pw }) });
+    toast("Contraseña de " + r.user + ": " + r.password, "ok");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+// ---- V2Ray ----
+async function loadV2ray() {
+  try {
+    const st = await api("/api/v2ray/status");
+    $("#v2rayStatusLine").textContent = st.installed
+      ? (st.active ? "· Xray activo · Reality :" + st.reality_port : "· Xray apagado · Reality :" + st.reality_port)
+      : "· Xray no instalado";
+  } catch (err) { $("#v2rayStatusLine").textContent = ""; }
+  const list = $("#v2rayList");
+  try {
+    const accounts = await api("/api/v2ray/accounts");
+    if (!accounts.length) { list.innerHTML = '<p class="muted">(sin cuentas UUID en la configuración de Xray)</p>'; return; }
+    let html = "";
+    accounts.forEach((a, i) => {
+      html += '<div class="glass" style="margin-bottom:12px"><h3>' + (a.principal ? "MUSTAFA-PRINCIPAL" : "MUSTAFA-" + (i + 1)) +
+        ' <span class="badge proto">' + esc(a.protocols.join(" + ") || "sin protocolo") + "</span></h3>" +
+        '<div class="mono" style="margin-bottom:6px">' + esc(a.uuid) + "</div>";
+      const l = a.links || {};
+      if (l.reality) html += linkRow("VLESS Reality", l.reality);
+      if (l.vmess_ws) html += linkRow("VMess WS", l.vmess_ws);
+      if (l.vless_ws) html += linkRow("VLESS WS", l.vless_ws);
+      if (l.xhttp) html += linkRow("VLESS XHTTP", l.xhttp);
+      if (!l.reality && !l.vmess_ws && !l.vless_ws && !l.xhttp)
+        html += '<p class="muted">(este UUID no está en ningún inbound de Xray)</p>';
+      html += '<div class="row" style="margin-top:8px"><button class="danger small" onclick="v2rayDel(\'' + esc(a.uuid) + "')\">Eliminar UUID</button></div></div>";
+    });
+    list.innerHTML = html;
+  } catch (err) { list.innerHTML = '<p class="muted">' + esc(err.message) + "</p>"; }
+}
+$("#btnRefreshV2ray").addEventListener("click", loadV2ray);
+$("#btnV2rayRestart").addEventListener("click", async () => {
+  try {
+    await api("/api/v2ray/restart", { method: "POST" });
+    toast("Xray reiniciado.", "ok"); loadV2ray();
+  } catch (err) { toast(err.message, "error"); }
+});
+$("#v2rayAddForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector("button[type=submit]");
+  btn.disabled = true;
+  try {
+    const r = await api("/api/v2ray/add", { method: "POST", body: JSON.stringify({ protocol: $("#v2rayProto").value }) });
+    const box = $("#v2rayAdded");
+    box.classList.remove("hidden");
+    let html = '<p><b>Nuevo usuario UUID:</b> <span class="mono">' + esc(r.uuid) + "</span> (" + esc(r.protocol) + ")</p>";
+    const l = r.links || {};
+    if (l.reality) html += linkRow("VLESS Reality", l.reality);
+    if (l.vmess_ws) html += linkRow("VMess WS", l.vmess_ws);
+    if (l.vless_ws) html += linkRow("VLESS WS", l.vless_ws);
+    if (l.xhttp) html += linkRow("VLESS XHTTP", l.xhttp);
+    box.innerHTML = html;
+    toast("Usuario UUID agregado.", "ok");
+    loadV2ray();
+  } catch (err) { toast(err.message, "error"); }
+  btn.disabled = false;
+});
+async function v2rayDel(target) {
+  if (!confirm("¿Eliminar el UUID?\n" + target)) return;
+  try {
+    await api("/api/v2ray/delete", { method: "POST", body: JSON.stringify({ uuid: target }) });
+    toast("UUID eliminado.", "ok");
+    loadV2ray();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+// ---- Protocolos ----
+async function loadProtocols() {
+  const grid = $("#protoGrid");
+  try {
+    const protos = await api("/api/protocols");
+    let html = "";
+    for (const p of protos) {
+      html += '<div class="glass proto-card"><h3>' + esc(p.name) + " " + badge(p.active) + "</h3>" +
+        "<p>Puerto: " + (p.port == null ? "—" : esc(p.port)) +
+        (p.key === "checkuser" ? " · HTTPS :8443 " + badge(p.https8443) : "") + "</p>" +
+        '<div class="row">' +
+        '<button class="small" onclick="protoInstall(\'' + esc(p.key) + "', " + (p.port == null ? "null" : p.port) + ')">Instalar</button>' +
+        '<button class="danger small" onclick="protoUninstall(\'' + esc(p.key) + "')\">Desinstalar</button>" +
+        "</div></div>";
+    }
+    grid.innerHTML = html;
+  } catch (err) { grid.innerHTML = '<div class="glass"><p class="muted">' + esc(err.message) + "</p></div>"; }
+}
+$("#btnRefreshProto").addEventListener("click", loadProtocols);
+$("#btnCloseOutput").addEventListener("click", () => $("#protoOutputBox").classList.add("hidden"));
+
+function showProtoOutput(text) {
+  $("#protoOutput").textContent = text;
+  $("#protoOutputBox").classList.remove("hidden");
+  $("#protoOutputBox").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+async function protoInstall(key, curPort) {
+  let port = curPort;
+  if (curPort != null) {
+    const ans = prompt("Puerto para " + key + " (actual: " + curPort + "):", String(curPort));
+    if (ans === null) return;
+    port = parseInt(ans, 10);
+    if (!port || port < 1 || port > 65535) { toast("Puerto no válido (1-65535).", "error"); return; }
+  }
+  try {
+    const r = await api("/api/protocols/install", { method: "POST", body: JSON.stringify({ key, port }) });
+    showProtoOutput(r.output || "(sin salida)");
+    toast(r.ok ? key + " instalado." : key + " terminó con errores (revisa la salida).", r.ok ? "ok" : "error");
+    loadProtocols();
+  } catch (err) { toast(err.message, "error"); }
+}
+async function protoUninstall(key) {
+  if (!confirm("¿Desinstalar " + key + "? Se borra el servicio y su configuración.")) return;
+  try {
+    const r = await api("/api/protocols/uninstall", { method: "POST", body: JSON.stringify({ key }) });
+    showProtoOutput(r.output || "(sin salida)");
+    toast(r.ok ? key + " desinstalado." : key + " terminó con errores (revisa la salida).", r.ok ? "ok" : "error");
+    loadProtocols();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+// ---- Herramientas ----
+async function loadTools() {
+  try {
+    const t = await api("/api/tools/status");
+    $("#toolsStats").innerHTML =
+      statCard(t.fail2ban === "on" ? "ON" : t.fail2ban === "off" ? "OFF" : "--", "Fail2Ban") +
+      statCard(esc(t.bbr), "BBR") +
+      statCard(t.vnstat === "on" ? "ON" : t.vnstat === "off" ? "OFF" : "--", "vnStat") +
+      statCard(esc(t.backup || "ninguno"), "Último respaldo") +
+      statCard(t.bot === "on" ? "ON" : t.bot === "off" ? "OFF" : "--", "Bot WhatsApp");
+  } catch (err) { $("#toolsStats").innerHTML = '<p class="muted">' + esc(err.message) + "</p>"; }
+}
+$("#btnRefreshTools").addEventListener("click", loadTools);
+$("#btnBackup").addEventListener("click", async () => {
+  const out = $("#toolsOutput");
+  out.classList.remove("hidden"); out.textContent = "Creando respaldo…";
+  try {
+    const r = await api("/api/tools/backup", { method: "POST" });
+    out.textContent = r.output || "Respaldo creado.";
+    toast("Respaldo creado.", "ok"); loadTools();
+  } catch (err) { out.textContent = err.message; toast(err.message, "error"); }
+});
+$("#btnTraffic").addEventListener("click", async () => {
+  const out = $("#toolsOutput");
+  out.classList.remove("hidden"); out.textContent = "Cargando…";
+  try { const r = await api("/api/tools/traffic"); out.textContent = r.output; }
+  catch (err) { out.textContent = err.message; }
+});
+$("#btnBans").addEventListener("click", async () => {
+  const out = $("#toolsOutput");
+  out.classList.remove("hidden"); out.textContent = "Cargando…";
+  try { const r = await api("/api/tools/bans"); out.textContent = r.output; }
+  catch (err) { out.textContent = err.message; }
+});
+$("#changePassForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("/api/panel/change-password", { method: "POST", body: JSON.stringify({ password: $("#newPanelPass").value }) });
+    $("#newPanelPass").value = "";
+    toast("Contraseña del panel cambiada.", "ok");
+  } catch (err) { toast(err.message, "error"); }
+});
+$("#btnRestartPanel").addEventListener("click", async () => {
+  if (!confirm("¿Reiniciar el panel web? Se cerrará esta sesión.")) return;
+  try { await api("/api/panel/restart", { method: "POST" }); } catch (e) {}
+  toast("El panel se está reiniciando. Vuelve a entrar en unos segundos.");
+  setTimeout(showLogin, 1500);
+});
+
+// ---- Arranque: si hay sesión, entra directo; si no, muestra el login ----
+(async function init() {
+  try {
+    await api("/api/status");
+    showApp();
+    loadDashboard();
+  } catch (err) {
+    showLogin();
+  }
+})();
+</script>
+</body>
+</html>

@@ -226,6 +226,9 @@ draw_menu() {
     menu_row "03" "• INSTALAR PROTOCOLOS" "04" "• GENERADOR DE KEY🤖"
     menu_row "05" "• HERRAMIENTAS🔐" "" ""
     echo
+    section_bar "PANEL"
+    menu_row "06" "• PANEL WEB🌐" "" ""
+    echo
     menu_row "00" "• SALIR"                "88" "• REINICIAR VPS"
     box_bottom
     echo
@@ -1522,6 +1525,72 @@ herramientas_menu() {
     done
 }
 
+# --- [06] PANEL WEB — panel glass con tarjetas --------------------------------
+# Gestiona el panel web MUSTAFA (Flask, :9090). El panel es la cara
+# gráfica del menú: tarjetas glass para SSH, V2Ray, Protocolos y
+# Herramientas, con login por contraseña.
+panel_web_menu() {
+    local opt ip
+    while true; do
+        clear
+        ip="$(get_ipv4)"
+        printf '%b\n  ============ PANEL WEB ============\n%b' "$C_CYAN_B" "$C_RESET"
+        printf '  Estado : %s\n' "$(unit_state panel-web)"
+        printf '  URL    : http://%s:9090\n' "${ip:-<IP>}"
+        if [[ -f /etc/mustafa/panel/password.hash ]]; then
+            printf '  Clave  : configurada\n'
+        else
+            printf '  Clave  : sin configurar\n'
+        fi
+        echo
+        printf '  [1] Instalar panel web\n'
+        printf '  [2] Desinstalar panel web\n'
+        printf '  [3] Reiniciar panel web\n'
+        printf '  [4] Cambiar contraseña\n'
+        printf '  [5] Ver URL y estado\n'
+        printf '  [0] Volver\n'
+        echo
+        read -rp "  Seleccione una opción: " opt || return 0
+        case "$opt" in
+            1)
+                if [[ -f "$INSTALL_DIR/panel-web.sh" ]]; then
+                    echo; bash "$INSTALL_DIR/panel-web.sh"
+                else
+                    echo; echo "  No está el instalador $INSTALL_DIR/panel-web.sh."
+                    echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+                fi
+                pause ;;
+            2)
+                read -rp "  ¿Desinstalar el panel web? [s/N]: " ans || ans=""
+                if [[ "$ans" == "s" || "$ans" == "S" ]]; then
+                    [[ -f "$INSTALL_DIR/panel-web.sh" ]] && bash "$INSTALL_DIR/panel-web.sh" --uninstall || echo "  No está el instalador $INSTALL_DIR/panel-web.sh."
+                else
+                    echo "  Cancelado."
+                fi
+                pause ;;
+            3)
+                systemctl restart panel-web 2>/dev/null && echo "  Panel reiniciado." || echo "  No se pudo reiniciar (¿está instalado?)."
+                pause ;;
+            4)
+                if [[ -f "$INSTALL_DIR/panel-web.sh" ]]; then
+                    echo; bash "$INSTALL_DIR/panel-web.sh" --password
+                else
+                    echo "  No está el instalador $INSTALL_DIR/panel-web.sh."
+                fi
+                pause ;;
+            5)
+                echo
+                echo "  Panel web MUSTAFA (glass + tarjetas):"
+                echo "  URL    : http://${ip:-<IP>}:9090"
+                echo "  Estado : $(unit_state panel-web)"
+                systemctl --no-pager status panel-web --lines=5 2>/dev/null || echo "  (el servicio panel-web no está instalado)"
+                pause ;;
+            0) return 0 ;;
+            *) echo "  Opción no válida: $opt"; sleep 1 ;;
+        esac
+    done
+}
+
 # --- Bucle principal ---------------------------------------------------------------
 main() {
     [[ $EUID -eq 0 ]] || echo "  Aviso: el menú se debe ejecutar como root para ver todos los datos."
@@ -1535,6 +1604,7 @@ main() {
             03|3) protocols_menu ;;
             04|4) keygen_menu ;;
             05|5) herramientas_menu ;;
+            06|6) panel_web_menu ;;
             00|0) clear; echo "  Hasta luego."; exit 0 ;;
             88)   do_reboot ;;
             *)    echo "  Opción no válida: $opt"; sleep 1 ;;
