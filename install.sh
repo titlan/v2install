@@ -108,38 +108,43 @@ ok "Dependencias instaladas."
 # La KEY se genera con el menú MUSTAFA [04] GENERADOR DE KEY. Aquí solo se
 # valida su SHA-256 contra el registro publicado (keys.sha256 en el repo);
 # la KEY en claro nunca se escribe en el log (read -s) ni se guarda.
+# Primero se descarga el registro: si todavía no hay ninguna key publicada,
+# la instalación continúa sin verificar (modo prueba) y NO se exige KEY.
 KEYS_URL="${MUSTAFA_KEYS_URL:-https://raw.githubusercontent.com/titlan/v2install/main/keys.sha256}"
 INSTALL_KEY="${MUSTAFA_KEY:-}"
-if [[ -z "$INSTALL_KEY" ]]; then
-    if [[ -t 0 ]]; then
-        echo
-        echo "  Instalación con KEY (generada en el menú MUSTAFA [04])."
-        read -rsp "  KEY de instalación: " INSTALL_KEY || true
-        echo
-    else
-        die "Falta la KEY de instalación. Pásala con MUSTAFA_KEY=<key> bash install.sh"
-    fi
-fi
-[[ "$INSTALL_KEY" =~ ^MUSTAFA-[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$ ]] \
-    || die "Formato de KEY no válido (debe ser MUSTAFA-XXXX-XXXX-XXXX-XXXX)."
-KEY_HASH="$(printf '%s' "$INSTALL_KEY" | sha256sum | awk '{print $1}')"
-unset INSTALL_KEY
 KEYS_TMP="$(mktemp)"
 if curl -fsSL -m 15 "$KEYS_URL" -o "$KEYS_TMP" 2>/dev/null \
     && grep -v '^#' "$KEYS_TMP" | grep -q .; then
+    # Registro con keys publicadas: la KEY es obligatoria.
+    if [[ -z "$INSTALL_KEY" ]]; then
+        if [[ -t 0 ]]; then
+            echo
+            echo "  Instalación con KEY (generada en el menú MUSTAFA [04])."
+            read -rsp "  KEY de instalación: " INSTALL_KEY || true
+            echo
+        else
+            rm -f "$KEYS_TMP"
+            die "Falta la KEY de instalación. Pásala con MUSTAFA_KEY=<key> bash install.sh"
+        fi
+    fi
+    [[ "$INSTALL_KEY" =~ ^MUSTAFA-[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$ ]] \
+        || die "Formato de KEY no válido (debe ser MUSTAFA-XXXX-XXXX-XXXX-XXXX)."
+    KEY_HASH="$(printf '%s' "$INSTALL_KEY" | sha256sum | awk '{print $1}')"
+    unset INSTALL_KEY
     if grep -qx "$KEY_HASH" "$KEYS_TMP"; then
         ok "KEY válida."
     else
         rm -f "$KEYS_TMP"
         die "KEY no válida o revocada. Pide una KEY nueva a quien te la dio."
     fi
+    printf '%s\n' "$KEY_HASH" > "$STATE_DIR/installed-key"
+    chmod 600 "$STATE_DIR/installed-key"
 else
     warn "Sin registro de keys publicado ($KEYS_URL) — instalación sin verificación (modo prueba)."
     warn "En cuanto se publique la primera key, la KEY pasará a ser obligatoria."
+    unset INSTALL_KEY
 fi
 rm -f "$KEYS_TMP"
-printf '%s\n' "$KEY_HASH" > "$STATE_DIR/installed-key"
-chmod 600 "$STATE_DIR/installed-key"
 
 # =============================================================================
 #  3. Xray-core (última versión oficial de GitHub)
