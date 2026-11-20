@@ -51,6 +51,7 @@ sudo MUSTAFA_KEY=MUSTAFA-XXXX-XXXX-XXXX-XXXX bash install.sh [dominio]
 | `[02] MENU V2RAY` | Mostrar cuentas UUID y enlaces (VLESS Reality, VMess WS, VLESS WS, **VLESS XHTTP** — se elige el transporte al mostrar o agregar), agregar/eliminar UUID, reiniciar Xray, estado, **instalar / desinstalar V2Ray** |
 | `[03] INSTALAR PROTOCOLOS` | Cada protocolo trae **Instalar / Desinstalar / Cambiar puerto** (ver tabla). Muestra `[ON]` / `[OFF]` / `[--]` y el puerto actual |
 | `[04] GENERADOR DE KEY` | Generar / listar / revocar keys, exportar hashes para el repo |
+| `[05] HERRAMIENTAS 🔐` | **Fail2Ban** (bloquea fuerza bruta SSH), **BBR** (más velocidad TCP), **vnStat** (tráfico por día/mes), **respaldo** de usuarios/keys/configs (`/root/mustafa-backup-*.tar.gz`) |
 | `[00] SALIR` | Salir del menú |
 | `[88] REINICIAR VPS` | Reinicia el VPS (pide confirmación) |
 
@@ -115,6 +116,7 @@ estado en `/var/www/html/monitor.html` (lo sirve Nginx en el :80).
 | `install/checkuser.sh`, `install/checkuser.py`, `install/checkuser.service` | CheckUser |
 | `install/hysteria2.sh` | Hysteria2 (binario oficial) |
 | `install/monitor.sh` | Monitor App |
+| `install/herramientas.sh` | Herramientas (Fail2Ban + BBR + vnStat + respaldo `mustafa-backup`) |
 | `README.md` | Este archivo |
 
 Los instaladores de protocolos se copian a `/etc/mustafa/install/` para
@@ -142,5 +144,9 @@ Versión **1.0**. Primera instalación real completada en un VPS limpio
 protocolos (CHTTP, V2SOCKS, HCR, BHTTP, mustafa-ws, Stunnel4, CheckUser,
 Monitor, Xray standalone) se probaron de punta a punta en local:
 instalación con puerto elegido, cambio de puerto, desinstalación y
-verificación de que el servicio escucha en el puerto. Falta probar cada
-protocolo en el VPS real y una conexión de la app de punta a punta.
+verificación de que el servicio escucha en el puerto. Las herramientas
+[05] (Fail2Ban, vnStat, respaldo) también se probaron en local vía el
+menú; BBR no se pudo probar en la VM de pruebas (su kernel no trae el
+módulo tcp_bbr) — en un VPS Ubuntu normal sí está disponible. Falta
+probar cada protocolo en el VPS real y una conexión de la app de punta
+a punta.

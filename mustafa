@@ -11,6 +11,7 @@
 #                                V2SOCKS, mustafa-ws, CheckUser, Monitor App,
 #                                Hysteria2
 #    [04] GENERADOR DE KEY     — generar/revocar keys de instalación
+#    [05] HERRAMIENTAS 🔐      — Fail2Ban + BBR + vnStat + respaldo
 #    [00] SALIR   [88] REINICIAR VPS
 #
 #  Los instaladores de protocolos viven en /etc/mustafa/install/
@@ -98,7 +99,7 @@ disp_width() {
     # wc -m cuenta bytes si el locale es POSIX/C; se fuerza C.UTF-8 para
     # contar caracteres reales (• = 1, emoji = 1 aquí + 1 extra abajo).
     n=$(printf '%s' "$s" | LC_ALL=C.UTF-8 wc -m)
-    e=$(printf '%s' "$s" | LC_ALL=C.UTF-8 grep -o '[🔥⭐🚀🤖🌍]' | wc -l)
+    e=$(printf '%s' "$s" | LC_ALL=C.UTF-8 grep -o '[🔥⭐🚀🤖🌍🔐]' | wc -l)
     echo $(( n + e ))
 }
 
@@ -180,6 +181,13 @@ section_bar() {
 # Fila de menú a dos columnas: número en cian, etiqueta en verde.
 # Las etiquetas se rellenan por ancho en celdas, no por bytes (emojis).
 menu_row() {
+    # Una sola columna (lado derecho vacío): rellena todo el ancho de la caja.
+    if [[ -z "$3" ]]; then
+        printf '%b│%b  %b[%s]%b %b%s %b│%b\n' \
+            "$C_CYAN" "$C_RESET" "$C_CYAN_B" "$1" "$C_RESET" "$C_GREEN" "$(pad_to "$2" 48)" \
+            "$C_CYAN" "$C_RESET"
+        return
+    fi
     printf '%b│%b  %b[%s]%b %b%s %b[%s]%b %b%s %b│%b\n' \
         "$C_CYAN" "$C_RESET" "$C_CYAN_B" "$1" "$C_RESET" "$C_GREEN" "$(pad_to "$2" 21)" \
         "$C_CYAN_B" "$3" "$C_RESET" "$C_GREEN" "$(pad_to "$4" 21)" \
@@ -216,6 +224,7 @@ draw_menu() {
     section_bar "MENU"
     menu_row "01" "• MENU SSH🔥"            "02" "• MENU V2RAY⭐"
     menu_row "03" "• INSTALAR PROTOCOLOS" "04" "• GENERADOR DE KEY🤖"
+    menu_row "05" "• HERRAMIENTAS🔐" "" ""
     echo
     menu_row "00" "• SALIR"                "88" "• REINICIAR VPS"
     box_bottom
@@ -1058,6 +1067,64 @@ keygen_menu() {
     done
 }
 
+# --- [05] HERRAMIENTAS ---------------------------------------------------------
+# Fail2Ban + BBR + vnStat + respaldo. El instalador es install/herramientas.sh
+# (se copia a /etc/mustafa/install/ con install.sh) y el respaldo es
+# /usr/local/bin/mustafa-backup.
+herramientas_menu() {
+    local opt st_f2b st_bbr st_vn last_bk
+    while true; do
+        clear
+        st_f2b="--"; st_vn="--"; last_bk="ninguno"
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl is-active --quiet fail2ban 2>/dev/null && st_f2b="ON"
+            systemctl is-active --quiet vnstat 2>/dev/null && st_vn="ON"
+        fi
+        st_bbr="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "?")"
+        last_bk="$(ls -t /root/mustafa-backup-*.tar.gz 2>/dev/null | head -n 1 || true)"
+        [[ -n "$last_bk" ]] && last_bk="$(basename "$last_bk")"
+        printf '%b\n  ============ HERRAMIENTAS 🔐 ============\n%b' "$C_CYAN_B" "$C_RESET"
+        printf '  Fail2Ban : %s\n' "$st_f2b"
+        printf '  BBR      : %s\n' "$st_bbr"
+        printf '  vnStat   : %s\n' "$st_vn"
+        printf '  Respaldo : %s\n' "$last_bk"
+        echo
+        printf '  [1] Instalar herramientas (Fail2Ban + BBR + vnStat + respaldo)\n'
+        printf '  [2] Crear respaldo ahora\n'
+        printf '  [3] Ver tráfico (vnstat)\n'
+        printf '  [4] Ver baneos de Fail2Ban\n'
+        printf '  [0] Volver\n'
+        echo
+        read -rp "  Seleccione una opción: " opt || return 0
+        case "$opt" in
+            1)
+                if [[ -f "$INSTALL_DIR/herramientas.sh" ]]; then
+                    bash "$INSTALL_DIR/herramientas.sh"
+                else
+                    echo
+                    echo "  No está el instalador $INSTALL_DIR/herramientas.sh."
+                    echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+                fi
+                pause ;;
+            2)
+                if [[ -x /usr/local/bin/mustafa-backup ]]; then
+                    echo; /usr/local/bin/mustafa-backup
+                else
+                    echo; echo "  El respaldo no está instalado. Corre primero [1]."
+                fi
+                pause ;;
+            3)
+                echo; vnstat 2>/dev/null || echo "  vnStat no está instalado. Corre primero [1]."
+                pause ;;
+            4)
+                echo; fail2ban-client status sshd 2>/dev/null || echo "  Fail2Ban no está instalado. Corre primero [1]."
+                pause ;;
+            0) return 0 ;;
+            *) echo "  Opción no válida: $opt"; sleep 1 ;;
+        esac
+    done
+}
+
 # --- Bucle principal ---------------------------------------------------------------
 main() {
     [[ $EUID -eq 0 ]] || echo "  Aviso: el menú se debe ejecutar como root para ver todos los datos."
@@ -1070,6 +1137,7 @@ main() {
             02|2) v2ray_menu ;;
             03|3) protocols_menu ;;
             04|4) keygen_menu ;;
+            05|5) herramientas_menu ;;
             00|0) clear; echo "  Hasta luego."; exit 0 ;;
             88)   do_reboot ;;
             *)    echo "  Opción no válida: $opt"; sleep 1 ;;
