@@ -67,7 +67,7 @@ mustafa-ws). Desinstalar borra el servicio, el binario y su configuración.
 
 | # | Protocolo | Puerto (defecto, configurable) | Instalador |
 | - | --------- | ------------------------------ | ---------- |
-| 1 | BadVPN (udpgw) | 7300 UDP | `install/badvpn.sh` (compila desde ambrop72/badvpn) |
+| 1 | BadVPN (udpgw) | 7300 (TCP, pasarela UDP) | `install/badvpn.sh` (binario precompilado amd64, segundos; si no es amd64 compila desde ambrop72/badvpn) |
 | 2 | Stunnel4 (SSH+SSL) | 443, o 4443 si Xray ocupa el 443 | `install/stunnel4.sh` (unidad systemd nativa) |
 | 3 | HCR | 8080 TLS | `install/hcr.sh` (compila desde `install/hcr-src/`) |
 | 4 | BHTTP | 8087 | `install/bhttp.sh` (compila desde `install/bhttp-src/`, solo x86_64) |
@@ -109,7 +109,8 @@ estado en `/var/www/html/monitor.html` (lo sirve Nginx en el :80).
 | `install/xray.sh` | Instalador standalone de Xray (para [02] → [6] Instalar V2Ray; también `--uninstall`). Respeta el puerto Reality guardado en `/etc/mustafa/ports/v2ray` (por [02] → [8]) en una instalación limpia; si hay config válida la reutiliza (KEEP_CONFIG) |
 | `mustafa` | Menú principal (se instala como comando `mustafa`) |
 | `keys.sha256` | Registro de hashes de keys válidas |
-| `install/badvpn.sh`, `install/stunnel4.sh` | Instaladores BadVPN / Stunnel4 |
+| `install/badvpn.sh` + `install/badvpn-udpgw-amd64.b64` | Instalador BadVPN: usa el binario precompilado amd64 (base64, SHA-256 verificado) en segundos; en otra arquitectura compila desde fuente |
+| `install/stunnel4.sh` | Instalador Stunnel4 (unidad systemd nativa) |
 | `install/hcr.sh` + `install/hcr-src/` | HCR (fuente Go limpia) |
 | `install/bhttp.sh` + `install/bhttp-src/` | BHTTP (fuente Go) |
 | `install/chttp.sh` + `install/chttp-src/` | CHTTP (fuente Go) |
