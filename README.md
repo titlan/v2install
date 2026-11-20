@@ -78,6 +78,7 @@ mustafa-ws). Desinstalar borra el servicio, el binario y su configuración.
 | 9 | Monitor App | panel en `http://IP/monitor.html` (sin puerto propio) | `install/monitor.sh` |
 | 10 | Hysteria2 (QUIC/UDP) | 443 UDP | `install/hysteria2.sh` (binario oficial HyNetwork/hysteria, SHA-256 verificado) |
 | 11 | WSPLUS (Upgrade 101) | 8081 TLS | `install/wsplus.sh` (compila desde `install/wsplus-src/`) |
+| 12 | DOH (DNS over HTTPS) | 8053 TLS | `install/doh.sh` (compila desde `install/doh-src/`) |
 
 La base (sin entrar al menú [03]) ya instala: Xray (VLESS Reality :443,
 VMess WS :10086, VLESS WS :10087, **VLESS XHTTP :10088**), Nginx proxy
@@ -117,6 +118,7 @@ estado en `/var/www/html/monitor.html` (lo sirve Nginx en el :80).
 | `install/checkuser.sh`, `install/checkuser.py`, `install/checkuser.service` | CheckUser |
 | `install/hysteria2.sh` | Hysteria2 (binario oficial) |
 | `install/wsplus.sh` + `install/wsplus-src/` | WSPLUS (fuente Go) |
+| `install/doh.sh` + `install/doh-src/` | DOH (fuente Go) |
 | `install/monitor.sh` | Monitor App |
 | `install/herramientas.sh` | Herramientas (Fail2Ban + BBR + vnStat + respaldo `mustafa-backup`) |
 | `README.md` | Este archivo |
@@ -131,6 +133,7 @@ lleva binarios.
 22 SSH · 80 HTTP/Nginx/CheckUser/Monitor · 443 Xray VLESS Reality
 (o Stunnel4 si Xray no lo ocupa) · 444 mustafa-ws · 7300 BadVPN UDP ·
 8080 HCR · 8081 WSPLUS · 8087 BHTTP · 8444 V2SOCKS señal · 8445 CHTTP · 8888 CheckUser
+· **8053 DOH** · 10086 VMess WS · 10087 VLESS WS · 10088 VLESS XHTTP · 443 Xray/Reality.
 (loopback) · 10086 VMess WS · 10087 VLESS WS · 10088 VLESS XHTTP ·
 UDP 3478 V2SOCKS · UDP 443 Hysteria2 · 5667 ZIVPN UDP (futuro).
 
@@ -144,10 +147,14 @@ de loopback (el público sigue siendo el :80 de Nginx).
 Versión **1.0**. Primera instalación real completada en un VPS limpio
 (2026-11-19, base Xray + menú funcionando). Los instaladores de
 protocolos (CHTTP, V2SOCKS, HCR, BHTTP, mustafa-ws, Stunnel4, CheckUser,
-Monitor, Xray standalone, Hysteria2, WSPLUS) se probaron de punta a punta en local:
+Monitor, Xray standalone, Hysteria2, WSPLUS, DOH) se probaron de punta a punta en local:
 instalación con puerto elegido, cambio de puerto, desinstalación y
 verificación de que el servicio escucha en el puerto. WSPLUS además se
-probó de punta a punta Java ↔ Go (handshake 101 + eco, plano y TLS). Las herramientas
+probó de punta a punta Java ↔ Go (handshake 101 + eco, plano y TLS).
+DOH también se probó Java ↔ Go (base32 + codec DNS + eco, plano y TLS);
+es un túnel DNS real sobre HTTPS (RFC 8484), más lento que WSPLUS/CHTTP
+pero mucho más difícil de detectar: su papel es el camino sigiloso cuando
+los demás están bloqueados. Las herramientas
 [05] (Fail2Ban, vnStat, respaldo) también se probaron en local vía el
 menú; BBR no se pudo probar en la VM de pruebas (su kernel no trae el
 módulo tcp_bbr) — en un VPS Ubuntu normal sí está disponible. Falta
