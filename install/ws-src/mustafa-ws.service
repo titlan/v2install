@@ -1,0 +1,16 @@
+[Unit]
+Description=MUSTAFA WebSocket Proxy (WS/WSS -> SSH)
+After=network.target sshd.service
+Wants=sshd.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/mustafa-ws -config /etc/mustafa-ws/config
+Restart=always
+RestartSec=3s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

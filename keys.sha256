@@ -1,0 +1,14 @@
+# MUSTAFA — Registro de keys de instalación (hashes SHA-256, uno por línea)
+#
+# Cada línea es el SHA-256 de una KEY generada con el menú MUSTAFA
+# [04] GENERADOR DE KEY. install.sh descarga este archivo y acepta solo
+# las keys cuyo hash aparece aquí.
+#
+# Cómo publicar una key:
+#   1. En el VPS con MUSTAFA instalado: menú [04] -> [1] Generar nueva KEY
+#   2. Menú [04] -> [4] Exportar hashes (muestra los hashes activos)
+#   3. Pega esos hashes en este archivo (uno por línea) y súbelo a la raíz
+#      de titlan/v2install como keys.sha256
+# Para revocar una key, borra su hash de este archivo.
+#
+# Las keys en claro NUNCA van aquí, solo sus hashes (no se pueden revertir).

@@ -1,0 +1,31 @@
+# Configuración de mustafa-ws — Proxy WebSocket -> TCP (MUSTAFA)
+# Copiar a /etc/mustafa-ws/config y editar. Los flags de línea de
+# comandos tienen prioridad sobre este archivo.
+
+# Dirección de escucha. 0.0.0.0:444 = solo IPv4, :444 = IPv4 + IPv6.
+LISTEN=0.0.0.0:444
+
+# Destino del túnel (normalmente el SSH local).
+TARGET=127.0.0.1:22
+
+# Token compartido. El cliente debe mandarlo en la ruta (GET /TOKEN)
+# o en la cabecera X-Mustafa-Token. Vacío = sin autenticación
+# (no recomendado: cualquiera que llegue al puerto puede usar el túnel).
+TOKEN=
+
+# Certificado y clave para WSS (WebSocket con TLS). Si están vacíos,
+# el proxy sirve WS plano. Con certbot, por ejemplo:
+# TLS_CERT=/etc/letsencrypt/live/tudominio.com/fullchain.pem
+# TLS_KEY=/etc/letsencrypt/live/tudominio.com/privkey.pem
+TLS_CERT=
+TLS_KEY=
+
+# Límites de conexiones.
+MAX_CONNS=100
+MAX_CONNS_PER_IP=5
+
+# Tiempo sin tráfico antes de cerrar un túnel (ej. 5m, 30s). 0 = sin límite.
+IDLE_TIMEOUT=0
+
+# Archivo de log adicional (además de stdout / journal).
+LOG_FILE=/var/log/mustafa-ws.log
