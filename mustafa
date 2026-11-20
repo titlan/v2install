@@ -1181,10 +1181,19 @@ proto_menu() {
         echo
         printf '  Estado : %s\n' "$(unit_state "$unit")"
         [[ "$has_port" == 1 ]] && printf '  Puerto : %s\n' "$cur"
+        # CheckUser: muestra si el sidecar HTTPS :8443 está activo.
+        [[ "$key" == "checkuser" ]] && printf '  HTTPS :8443 : %s\n' "$(unit_state checkuser-https)"
         echo
         printf '  [1] Instalar %s\n' "$name"
         printf '  [2] Desinstalar %s\n' "$name"
         [[ "$has_port" == 1 ]] && printf '  [3] Cambiar puerto (actual: %s)\n' "$cur"
+        if [[ "$key" == "checkuser" ]]; then
+            if systemctl is-active --quiet checkuser-https 2>/dev/null; then
+                printf '  [4] Quitar CheckUser por HTTPS :8443\n'
+            else
+                printf '  [4] Instalar CheckUser por HTTPS :8443\n'
+            fi
+        fi
         printf '  [0] Volver\n'
         echo
         read -rp "  Seleccione una opción: " opt || return 0
@@ -1214,6 +1223,25 @@ proto_menu() {
                 if [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then echo "  Puerto no válido (1-65535)."; sleep 1; continue; fi
                 if [[ "$port" == "$cur" ]]; then echo "  Ya está en ese puerto."; sleep 1; continue; fi
                 proto_do_install "$key" "$script" "$envvar" "$port"
+                pause ;;
+            4)
+                [[ "$key" == "checkuser" ]] || { echo "  Opción no válida: $opt"; sleep 1; continue; }
+                if [[ ! -f "$INSTALL_DIR/checkuser-https.sh" ]]; then
+                    echo
+                    echo "  No está el instalador $INSTALL_DIR/checkuser-https.sh."
+                    echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+                    pause; continue
+                fi
+                echo
+                if systemctl is-active --quiet checkuser-https 2>/dev/null; then
+                    read -rp "  ¿Quitar CheckUser por HTTPS :8443? [s/N]: " ans || return 0
+                    [[ "$ans" == "s" || "$ans" == "S" ]] || continue
+                    bash "$INSTALL_DIR/checkuser-https.sh" --uninstall || echo "  (la desinstalación terminó con error — revisa la salida)"
+                else
+                    echo "  Instalando CheckUser por HTTPS :8443..."
+                    echo
+                    bash "$INSTALL_DIR/checkuser-https.sh" || echo "  (la instalación terminó con error — revisa la salida)"
+                fi
                 pause ;;
             0) return 0 ;;
             *) echo "  Opción no válida: $opt"; sleep 1 ;;

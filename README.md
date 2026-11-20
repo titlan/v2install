@@ -74,7 +74,7 @@ mustafa-ws). Desinstalar borra el servicio, el binario y su configuración.
 | 5 | CHTTP | 8445 TLS | `install/chttp.sh` (compila desde `install/chttp-src/`) |
 | 6 | V2SOCKS | señal 8444, UDP 3478 (fijo) | `install/v2socks.sh` (compila desde `install/v2socks-src/`) |
 | 7 | mustafa-ws (SSH/WS) | 444 | `install/mustafa-ws.sh` (compila desde `install/ws-src/`) |
-| 8 | CheckUser | :80 público (vía Nginx) / 8888 loopback | `install/checkuser.sh` |
+| 8 | CheckUser | :80 público (vía Nginx) / 8888 loopback + **HTTPS :8443** (stunnel -> Nginx, con el cert Let's Encrypt del dominio; la app lo necesita en datos Telcel) | `install/checkuser.sh` + `install/checkuser-https.sh` |
 | 9 | Monitor App | panel en `http://IP/monitor.html` (sin puerto propio) | `install/monitor.sh` |
 | 10 | Hysteria2 (QUIC/UDP) | 443 UDP | `install/hysteria2.sh` (binario oficial HyNetwork/hysteria, SHA-256 verificado) |
 | 11 | WSPLUS (Upgrade 101) | 8081 TLS | `install/wsplus.sh` (compila desde `install/wsplus-src/`) |
@@ -116,7 +116,8 @@ estado en `/var/www/html/monitor.html` (lo sirve Nginx en el :80).
 | `install/chttp.sh` + `install/chttp-src/` | CHTTP (fuente Go) |
 | `install/v2socks.sh` + `install/v2socks-src/` | V2SOCKS (fuente Go) |
 | `install/mustafa-ws.sh` + `install/ws-src/` | mustafa-ws (fuente Go) |
-| `install/checkuser.sh`, `install/checkuser.py`, `install/checkuser.service` | CheckUser |
+| `install/checkuser.sh`, `install/checkuser.py`, `install/checkuser.service` | CheckUser (loopback :8888 + Nginx :80) |
+| `install/checkuser-https.sh` | CheckUser por HTTPS :8443 (stunnel -> Nginx :80, con el cert de /etc/mustafa/ssl/; sin cert no se instala porque la app no confía un autofirmado) |
 | `install/hysteria2.sh` | Hysteria2 (binario oficial) |
 | `install/wsplus.sh` + `install/wsplus-src/` | WSPLUS (fuente Go) |
 | `install/doh.sh` + `install/doh-src/` | DOH (fuente Go) |
@@ -135,7 +136,7 @@ lleva binarios.
 22 SSH · 80 HTTP/Nginx/CheckUser/Monitor · 443 Xray VLESS Reality
 (o Stunnel4 si Xray no lo ocupa; el puerto Reality se cambia en [02] → [8],
 se guarda en `/etc/mustafa/ports/v2ray` y sobrevive a reinstalaciones) · 444 mustafa-ws · 7300 BadVPN UDP ·
-8080 HCR · 8081 WSPLUS · 8087 BHTTP · 8444 V2SOCKS señal · 8445 CHTTP · 8888 CheckUser
+8080 HCR · 8081 WSPLUS · 8087 BHTTP · **8443 CheckUser HTTPS** · 8444 V2SOCKS señal · 8445 CHTTP · 8888 CheckUser
 · **8053 DOH** · 10086 VMess WS · 10087 VLESS WS · 10088 VLESS XHTTP · 443 Xray/Reality.
 (loopback) · 10086 VMess WS · 10087 VLESS WS · 10088 VLESS XHTTP ·
 UDP 3478 V2SOCKS · UDP 443 Hysteria2 · 5667 ZIVPN UDP (futuro).

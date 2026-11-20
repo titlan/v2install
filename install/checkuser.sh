@@ -101,6 +101,26 @@ PYEOF
     fi
 }
 
+# Activa el sidecar HTTPS :8443 (checkuser-https.sh) si existe su
+# instalador y hay certificado Let's Encrypt en /etc/mustafa/ssl/.
+# Best-effort: sin cert, checkUser :80 sigue funcionando y solo se avisa.
+setup_https_sidecar() {
+    local https="$DIR/checkuser-https.sh"
+    [[ -f "$https" ]] || return 0
+    if [[ -f /etc/mustafa/ssl/fullchain.pem && -f /etc/mustafa/ssl/privkey.pem ]]; then
+        bash "$https" || warn "El sidecar HTTPS :8443 no se pudo activar (revisa la salida de arriba)."
+    else
+        info "Sin certificado TLS en /etc/mustafa/ssl/: checkUser solo por HTTP :80. Para HTTPS :8443 emite un cert con tu dominio (ver checkuser-https.sh)."
+    fi
+}
+
+# Quita el sidecar HTTPS :8443 (best-effort).
+remove_https_sidecar() {
+    local https="$DIR/checkuser-https.sh"
+    [[ -f "$https" ]] || return 0
+    bash "$https" --uninstall || true
+}
+
 [[ "$(id -u)" -eq 0 ]] || fail "Ejecuta como root (sudo bash checkuser.sh)."
 
 # --- Puerto --------------------------------------------------------------------
@@ -127,6 +147,7 @@ fi
 # --- Desinstalar ---------------------------------------------------------------
 if [[ "${1:-}" == "--uninstall" ]]; then
     echo "[checkuser] Desinstalando checkUser..."
+    remove_https_sidecar
     systemctl stop "$SERVICE" 2>/dev/null || true
     systemctl disable "$SERVICE" 2>/dev/null || true
     rm -f "/etc/systemd/system/$SERVICE.service" "$BIN"
@@ -148,6 +169,7 @@ if [[ -x "$BIN" ]] && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
         curl -fsS -m 5 "http://127.0.0.1:$PORT/server/online" 2>/dev/null &&
             echo "  /server/online responde." || echo "  (aviso: /server/online no respondió en local)"
         ensure_nginx_proxy
+        setup_https_sidecar
         systemctl --no-pager status "$SERVICE" --lines=5 || true
         exit 0
     fi
@@ -178,6 +200,7 @@ ss -tln 2>/dev/null | grep -q ":$PORT " ||
 mkdir -p /etc/mustafa/ports
 echo "$PORT" > /etc/mustafa/ports/checkuser
 ensure_nginx_proxy
+setup_https_sidecar
 
 IP="$(curl -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
 echo
