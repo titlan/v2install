@@ -522,17 +522,37 @@ v2ray_elegir_transporte() {
     esac
 }
 
+# Protocolos en los que existe un UUID (uno por línea: reality, ws, xhttp).
+# Un usuario puede estar solo en algunos inbounds (creado con [2] por
+# protocolo), así que los enlaces se muestran solo para esos.
+v2ray_uuid_protocols() {
+    local uuid=$1
+    [[ -f "$XRAY_CONF" ]] || return
+    jq -r --arg uuid "$uuid" \
+        '.inbounds[] | select(.settings.clients[]?.id == $uuid) | if .streamSettings.security == "reality" then "reality" elif .streamSettings.network == "ws" then "ws" elif .streamSettings.network == "xhttp" then "xhttp" else empty end' \
+        "$XRAY_CONF" 2>/dev/null | sort -u
+}
+
 v2ray_links() {
     local uuid=$1 name=$2 host=$3 transp=${4:-todos} pub sid rport
+    local tiene_reality=0 tiene_ws=0 tiene_xhttp=0 p
     pub="$(info_val reality_public)"; sid="$(info_val reality_shortid)"
     rport="$(v2ray_reality_port)"
+    # Solo mostrar enlaces de los protocolos donde el UUID existe de verdad.
+    while read -r p; do
+        case "$p" in
+            reality) tiene_reality=1 ;;
+            ws) tiene_ws=1 ;;
+            xhttp) tiene_xhttp=1 ;;
+        esac
+    done < <(v2ray_uuid_protocols "$uuid")
     echo
     printf '  %b%s%b  (%s)\n' "$C_GREEN_B" "$name" "$C_RESET" "$uuid"
-    if [[ "$transp" == todos || "$transp" == reality ]]; then
+    if [[ "$transp" == todos || "$transp" == reality ]] && [[ $tiene_reality == 1 ]]; then
         printf '  VLESS Reality: vless://%s@%s:%s?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=%s&sid=%s&type=tcp&flow=xtls-rprx-vision#%s\n' \
             "$uuid" "$host" "$rport" "$pub" "$sid" "$name"
     fi
-    if [[ "$transp" == todos || "$transp" == ws ]]; then
+    if [[ "$transp" == todos || "$transp" == ws ]] && [[ $tiene_ws == 1 ]]; then
         local vmess_json
         vmess_json="$(jq -n --arg ps "$name" --arg add "$host" --arg id "$uuid" \
             '{v:"2",ps:$ps,add:$add,port:"80",id:$id,aid:"0",net:"ws",type:"none",host:$add,path:"/vmess",tls:""}' 2>/dev/null | base64 -w0)"
@@ -540,9 +560,12 @@ v2ray_links() {
         printf '  VLESS WS     : vless://%s@%s:80?encryption=none&security=none&type=ws&host=%s&path=/vless#%s\n' \
             "$uuid" "$host" "$host" "$name"
     fi
-    if [[ "$transp" == todos || "$transp" == xhttp ]]; then
+    if [[ "$transp" == todos || "$transp" == xhttp ]] && [[ $tiene_xhttp == 1 ]]; then
         printf '  VLESS XHTTP  : vless://%s@%s:80?encryption=none&security=none&type=xhttp&host=%s&path=/xhttp#%s\n' \
             "$uuid" "$host" "$host" "$name"
+    fi
+    if [[ $tiene_reality == 0 && $tiene_ws == 0 && $tiene_xhttp == 0 ]]; then
+        echo "  (este UUID no está en ningún inbound de Xray)"
     fi
 }
 
@@ -569,18 +592,47 @@ v2ray_show() {
 }
 
 v2ray_add() {
-    local uuid tmp
+    local uuid tmp prot jq_filter
     if [[ ! -f "$XRAY_CONF" ]]; then
         echo "  Xray no está instalado."
         return
     fi
     command -v jq >/dev/null 2>&1 || { echo "  Falta jq (lo instala install.sh)."; return; }
+    # Elegir en qué protocolo(s) se crea el usuario (no solo qué enlaces
+    # mostrar: el UUID solo se agrega a esos inbounds).
+    {
+        echo
+        echo "  Protocolo para el nuevo usuario:"
+        echo "    [1] Todos (Reality + WebSocket + XHTTP)"
+        echo "    [2] Solo Reality"
+        echo "    [3] Solo WebSocket"
+        echo "    [4] Solo XHTTP"
+    } >&2
+    read -rp "  Elige [1-4] (Enter = Todos): " prot
+    case "$prot" in
+        2) prot="reality" ;;
+        3) prot="ws" ;;
+        4) prot="xhttp" ;;
+        *) prot="todos" ;;
+    esac
     uuid="$(cat /proc/sys/kernel/random/uuid)"
     tmp="$(mktemp)"
     cp "$XRAY_CONF" "$XRAY_CONF.bak"
-    if ! jq --arg uuid "$uuid" \
-        '.inbounds |= map(if (.settings.clients | length) > 0 then .settings.clients += [(.settings.clients[0] | .id = $uuid)] else . end)' \
-        "$XRAY_CONF" > "$tmp" 2>/dev/null; then
+    case "$prot" in
+        reality)
+            jq_filter='.inbounds |= map(if .streamSettings.security == "reality" then .settings.clients += [((.settings.clients[0] // {}) | .id = $uuid | .flow = "xtls-rprx-vision")] else . end)'
+            ;;
+        ws)
+            jq_filter='.inbounds |= map(if .streamSettings.network == "ws" then .settings.clients += [((.settings.clients[0] // {}) | .id = $uuid)] else . end)'
+            ;;
+        xhttp)
+            jq_filter='.inbounds |= map(if .streamSettings.network == "xhttp" then .settings.clients += [((.settings.clients[0] // {}) | .id = $uuid)] else . end)'
+            ;;
+        *)
+            jq_filter='.inbounds |= map(if (.settings.clients | length) > 0 then .settings.clients += [(.settings.clients[0] | .id = $uuid)] else . end)'
+            ;;
+    esac
+    if ! jq --arg uuid "$uuid" "$jq_filter" "$XRAY_CONF" > "$tmp" 2>/dev/null; then
         echo "  No se pudo editar la configuración."
         rm -f "$tmp"; return
     fi
@@ -592,12 +644,18 @@ v2ray_add() {
             return
         fi
     fi
+    if ! v2ray_uuids | grep -qx "$uuid"; then
+        echo "  El usuario no se agregó: el inbound de $prot no existe en la config."
+        echo "  (Si falta XHTTP, corre [02] -> [6] para migrar la config.)"
+        return
+    fi
     if command -v systemctl >/dev/null 2>&1; then
         systemctl restart xray 2>/dev/null || echo "  (no se pudo reiniciar xray — revisa su estado)"
     fi
     echo
     printf '  Nuevo usuario UUID: %b%s%b\n' "$C_GREEN_B" "$uuid" "$C_RESET"
-    v2ray_links "$uuid" "MUSTAFA-NUEVO" "$(v2ray_host)" "$(v2ray_elegir_transporte)"
+    echo "  Protocolo: $prot"
+    v2ray_links "$uuid" "MUSTAFA-NUEVO" "$(v2ray_host)" "$prot"
 }
 
 v2ray_del() {

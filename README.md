@@ -48,7 +48,7 @@ sudo MUSTAFA_KEY=MUSTAFA-XXXX-XXXX-XXXX-XXXX bash install.sh [dominio]
 | Opción | Qué hace |
 | ------ | -------- |
 | `[01] MENU SSH` | Crear / remover / bloquear / editar / renovar usuarios SSH, mostrar cuentas, usuarios conectados, eliminar vencidos |
-| `[02] MENU V2RAY` | Mostrar cuentas UUID y enlaces (VLESS Reality, VMess WS, VLESS WS, **VLESS XHTTP** — se elige el transporte al mostrar o agregar), agregar/eliminar UUID, **cambiar puerto Reality [8]**, **modificar UUID [9]** (escribir uno o generar aleatorio), reiniciar Xray, estado, **instalar / desinstalar V2Ray** |
+| `[02] MENU V2RAY` | Mostrar cuentas UUID y enlaces (VLESS Reality, VMess WS, VLESS WS, **VLESS XHTTP** — se elige el transporte al mostrar; los enlaces solo se muestran para los protocolos donde el UUID existe), **agregar usuario UUID eligiendo el protocolo** [2] (Todos / Solo Reality / Solo WebSocket / Solo XHTTP — el UUID solo se crea en esos inbounds), eliminar UUID, **cambiar puerto Reality [8]**, **modificar UUID [9]** (escribir uno o generar aleatorio), reiniciar Xray, estado, **instalar / desinstalar V2Ray** |
 | `[03] INSTALAR PROTOCOLOS` | Cada protocolo trae **Instalar / Desinstalar / Cambiar puerto** (ver tabla). Muestra `[ON]` / `[OFF]` / `[--]` y el puerto actual |
 | `[04] GENERADOR DE KEY` | Generar / listar / revocar keys, exportar hashes para el repo |
 | `[05] HERRAMIENTAS 🔐` | **Fail2Ban** (bloquea fuerza bruta SSH), **BBR** (más velocidad TCP), **vnStat** (tráfico por día/mes), **respaldo** de usuarios/keys/configs (`/root/mustafa-backup-*.tar.gz`), **bot WhatsApp** (Knightbot-MD, Baileys: administra grupos con `.tagall`, `.kick`, `.ban`, `.mute`, `.warn`, `.antilink`, juegos, IA, stickers; se vincula con código de pareo, SIM de prepago) |
