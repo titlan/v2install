@@ -8,7 +8,8 @@
 #    [01] MENU SSH             — administrar usuarios SSH (estilo La Casita)
 #    [02] MENU V2RAY           — cuentas UUID de Xray + enlaces
 #    [03] INSTALAR PROTOCOLOS  — BadVPN, Stunnel4, HCR, BHTTP, CHTTP,
-#                                V2SOCKS, mustafa-ws, CheckUser, Monitor App
+#                                V2SOCKS, mustafa-ws, CheckUser, Monitor App,
+#                                Hysteria2
 #    [04] GENERADOR DE KEY     — generar/revocar keys de instalación
 #    [00] SALIR   [88] REINICIAR VPS
 #
@@ -783,6 +784,7 @@ proto_port() {
             v2socks)    p="$(grep -o -- '--signal-addr :[0-9]*' /etc/systemd/system/v2socks.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
             mustafa-ws) p="$(grep '^LISTEN=' /etc/mustafa-ws/config 2>/dev/null | cut -d: -f2- || true)" ;;
             checkuser)  p="$(grep -o -- '^Environment=CHECKUSER_PORT=[0-9]*' /etc/systemd/system/checkuser.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            hysteria2)  p="$(grep -o -- '^listen: :[0-9]*' /etc/hysteria2/config.yaml 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
         esac
     fi
     [[ -z "$p" ]] && p="$def"
@@ -848,6 +850,7 @@ proto_menu() {
         v2socks)    name="V2SOCKS";    script="v2socks.sh";    unit="v2socks";           def="8444"; envvar="V2SOCKS_PORT" ;;
         mustafa-ws) name="mustafa-ws"; script="mustafa-ws.sh"; unit="mustafa-ws";        def="444";  envvar="WS_PORT" ;;
         checkuser)  name="CheckUser";  script="checkuser.sh";  unit="checkuser";         def="8888"; envvar="CHECKUSER_PORT" ;;
+        hysteria2)  name="Hysteria2";  script="hysteria2.sh";  unit="hysteria2";         def="443";  envvar="HYSTERIA2_PORT" ;;
         monitor)    name="Monitor App"; script="monitor.sh";   unit="monitor-mustafa.timer"; def=""; envvar=""; has_port=0 ;;
         *) echo "  Protocolo desconocido: $key"; return ;;
     esac
@@ -914,6 +917,7 @@ protocols_menu() {
         printf '  [7] mustafa-ws    (WS :%-5s)       %s\n' "$(proto_port mustafa-ws 444)" "$(unit_state mustafa-ws)"
         printf '  [8] CheckUser     (:%-5s)          %s\n' "$(proto_port checkuser 8888)" "$(unit_state checkuser)"
         printf '  [9] Monitor App   (panel :80)      %s\n' "$(unit_state monitor-mustafa.timer)"
+        printf '  [10] Hysteria2    (UDP :%-5s)      %s\n' "$(proto_port hysteria2 443)" "$(unit_state hysteria2)"
         printf '  [0] Volver\n'
         token="$(ws_conf TOKEN)"
         [[ -n "$token" ]] && printf '\n  TOKEN WS (mustafa-ws): %s\n' "$token"
@@ -929,6 +933,7 @@ protocols_menu() {
             7) proto_menu mustafa-ws ;;
             8) proto_menu checkuser ;;
             9) proto_menu monitor ;;
+            10) proto_menu hysteria2 ;;
             0) return 0 ;;
             *) echo "  Opción no válida: $opt"; sleep 1 ;;
         esac

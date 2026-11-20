@@ -75,6 +75,7 @@ mustafa-ws). Desinstalar borra el servicio, el binario y su configuración.
 | 7 | mustafa-ws (SSH/WS) | 444 | `install/mustafa-ws.sh` (compila desde `install/ws-src/`) |
 | 8 | CheckUser | :80 público (vía Nginx) / 8888 loopback | `install/checkuser.sh` |
 | 9 | Monitor App | panel en `http://IP/monitor.html` (sin puerto propio) | `install/monitor.sh` |
+| 10 | Hysteria2 (QUIC/UDP) | 443 UDP | `install/hysteria2.sh` (binario oficial HyNetwork/hysteria, SHA-256 verificado) |
 
 La base (sin entrar al menú [03]) ya instala: Xray (VLESS Reality :443,
 VMess WS :10086, VLESS WS :10087, **VLESS XHTTP :10088**), Nginx proxy
@@ -112,6 +113,7 @@ estado en `/var/www/html/monitor.html` (lo sirve Nginx en el :80).
 | `install/v2socks.sh` + `install/v2socks-src/` | V2SOCKS (fuente Go) |
 | `install/mustafa-ws.sh` + `install/ws-src/` | mustafa-ws (fuente Go) |
 | `install/checkuser.sh`, `install/checkuser.py`, `install/checkuser.service` | CheckUser |
+| `install/hysteria2.sh` | Hysteria2 (binario oficial) |
 | `install/monitor.sh` | Monitor App |
 | `README.md` | Este archivo |
 
@@ -126,7 +128,7 @@ lleva binarios.
 (o Stunnel4 si Xray no lo ocupa) · 444 mustafa-ws · 7300 BadVPN UDP ·
 8080 HCR · 8087 BHTTP · 8444 V2SOCKS señal · 8445 CHTTP · 8888 CheckUser
 (loopback) · 10086 VMess WS · 10087 VLESS WS · 10088 VLESS XHTTP ·
-UDP 3478 V2SOCKS · UDP 443 Hysteria2 (futuro) · 5667 ZIVPN UDP (futuro).
+UDP 3478 V2SOCKS · UDP 443 Hysteria2 · 5667 ZIVPN UDP (futuro).
 
 Todos los puertos de la tabla de protocolos se pueden cambiar desde el
 menú [03] (cada protocolo → [3] Cambiar puerto); V2SOCKS cambia solo el
