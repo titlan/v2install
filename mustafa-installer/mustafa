@@ -1,0 +1,1211 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  MUSTAFA — Menú principal (v2install)
+#  Vista estilo THE_S: título amarillo en bloques, cajas con borde cian,
+#  texto verde, estado en vivo.
+#
+#  Estructura (tal cual la pidió David):
+#    [01] MENU SSH             — administrar usuarios SSH (estilo La Casita)
+#    [02] MENU V2RAY           — cuentas UUID de Xray + enlaces
+#    [03] INSTALAR PROTOCOLOS  — BadVPN, Stunnel4, HCR, BHTTP, CHTTP,
+#                                V2SOCKS, mustafa-ws, CheckUser, Monitor App,
+#                                Hysteria2, WSPLUS, DOH
+#    [04] GENERADOR DE KEY     — generar/revocar keys de instalación
+#    [05] HERRAMIENTAS 🔐      — Fail2Ban + BBR + vnStat + respaldo + bot WhatsApp
+#    [00] SALIR   [88] REINICIAR VPS
+#
+#  Los instaladores de protocolos viven en /etc/mustafa/install/
+#  (los copia install.sh desde install/ del repo).
+# =============================================================================
+
+VERSION="1.0"
+STATE_DIR="/etc/mustafa"
+INSTALL_DIR="/etc/mustafa/install"
+KEYS_DIR="/etc/mustafa/keys"
+KEYS_DB="$KEYS_DIR/keys.db"
+KEYS_HASHES="$KEYS_DIR/keys.sha256"
+
+# --- Colores -----------------------------------------------------------------
+C_RESET='\033[0m'
+C_CYAN='\033[0;36m'
+C_CYAN_B='\033[1;36m'
+C_GREEN='\033[0;32m'
+C_GREEN_B='\033[1;32m'
+C_YELLOW='\033[1;33m'
+C_RED='\033[0;31m'
+C_RED_B='\033[1;31m'
+C_BG_CYAN='\033[46m\033[30m'   # fondo cian, texto oscuro
+
+# --- Datos del sistema ---------------------------------------------------------
+get_os() {
+    if [[ -f /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        source /etc/os-release
+        echo "${NAME:-?} ${VERSION_ID:-?}"
+    else
+        echo "desconocido"
+    fi
+}
+
+get_uptime() {
+    if command -v uptime >/dev/null 2>&1; then
+        uptime -p 2>/dev/null | sed 's/^up //' || echo "?"
+    else
+        echo "?"
+    fi
+}
+
+# Uso de CPU en % (dos lecturas de /proc/stat con 0.5 s de diferencia)
+get_cpu_pct() {
+    local total_a idle_a total_b idle_b
+    read -r total_a idle_a < <(awk '/^cpu / {t=0; for(i=2;i<=NF;i++) t+=$i; print t, $5}' /proc/stat) \
+        || { echo 0; return; }
+    sleep 0.5
+    read -r total_b idle_b < <(awk '/^cpu / {t=0; for(i=2;i<=NF;i++) t+=$i; print t, $5}' /proc/stat) \
+        || { echo 0; return; }
+    local total_d=$((total_b - total_a)) idle_d=$((idle_b - idle_a))
+    [[ $total_d -gt 0 ]] || { echo 0; return; }
+    echo $(( (100 * (total_d - idle_d)) / total_d ))
+}
+
+get_ram_pct() {
+    free | awk '/^Mem:/ {printf "%.0f", $3/$2*100}'
+}
+
+get_ipv4() {
+    local ip=""
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    if [[ -z "$ip" ]] && command -v curl >/dev/null 2>&1; then
+        ip="$(curl -fsS -m 5 https://ifconfig.me 2>/dev/null || true)"
+    fi
+    echo "${ip:-?}"
+}
+
+get_domain() {
+    local d
+    if [[ -f "$STATE_DIR/domain" ]]; then
+        d="$(cat "$STATE_DIR/domain")"
+    else
+        d="sin configurar"
+    fi
+    echo "${d:0:38}"
+}
+
+# Ancho en celdas de terminal de un texto: caracteres (no bytes), y cada
+# emoji cuenta 2 celdas. Sin esto, %-21s de printf cuenta bytes y las filas
+# con █ ░ • o emojis salen descuadradas.
+disp_width() {
+    local s=$1 n e
+    # wc -m cuenta bytes si el locale es POSIX/C; se fuerza C.UTF-8 para
+    # contar caracteres reales (• = 1, emoji = 1 aquí + 1 extra abajo).
+    n=$(printf '%s' "$s" | LC_ALL=C.UTF-8 wc -m)
+    e=$(printf '%s' "$s" | LC_ALL=C.UTF-8 grep -o '[🔥⭐🚀🤖🌍🔐]' | wc -l)
+    echo $(( n + e ))
+}
+
+# Imprime el texto + espacios hasta el ancho dado (en celdas).
+pad_to() {
+    local w pad
+    w=$(disp_width "$1"); pad=$(( $2 - w )); [[ $pad -lt 0 ]] && pad=0
+    printf '%s%*s' "$1" "$pad" ""
+}
+
+bar() {
+    local pct=$1 width=${2:-16} filled i s=""
+    # OJO: el cálculo va en una línea aparte. En `local a=$1 b=$((a*2))`
+    # bash expande todos los valores ANTES de asignar, y filled salía 0.
+    filled=$(( pct * width / 100 ))
+    for ((i=0; i<filled; i++)); do s+="█"; done
+    for ((i=filled; i<width; i++)); do s+="░"; done
+    printf '[%s] %s%%' "$s" "$pct"
+}
+
+# Estado de un servicio: [RUN] verde o [OFF] rojo
+svc_status() {
+    local name=$1
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet "$name" 2>/dev/null; then
+            printf '%b[RUN]%b' "$C_GREEN_B" "$C_RESET"; return
+        fi
+    fi
+    if pgrep -x "$name" >/dev/null 2>&1; then
+        printf '%b[RUN]%b' "$C_GREEN_B" "$C_RESET"; return
+    fi
+    printf '%b[OFF]%b' "$C_RED_B" "$C_RESET"
+}
+
+# WS: [RUN] si el servicio mustafa-ws está activo
+ws_status() {
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet mustafa-ws 2>/dev/null; then
+            printf '%b[RUN]%b' "$C_GREEN_B" "$C_RESET"; return
+        fi
+    fi
+    if pgrep -x mustafa-ws >/dev/null 2>&1; then
+        printf '%b[RUN]%b' "$C_GREEN_B" "$C_RESET"; return
+    fi
+    printf '%b[OFF]%b' "$C_RED_B" "$C_RESET"
+}
+
+# --- Dibujo --------------------------------------------------------------------
+# Título MUSTAFA en bloques amarillos (5 filas x 41 caracteres)
+draw_title() {
+    printf '%b\n' "$C_YELLOW"
+    printf '  █   █ █   █  ███  █████  ███  █████  ███ \n'
+    printf '  ██ ██ █   █ █       █   █   █ █     █   █\n'
+    printf '  █ █ █ █   █  ███    █   █████ ████  █████\n'
+    printf '  █   █ █   █     █   █   █   █ █     █   █\n'
+    printf '  █   █  ███  ████    █   █   █ █     █   █\n'
+    printf '%b' "$C_RESET"
+}
+
+box_top()    { printf '%b┌────────────────────────────────────────────────────────┐%b\n' "$C_CYAN" "$C_RESET"; }
+box_bottom() { printf '%b└────────────────────────────────────────────────────────┘%b\n' "$C_CYAN" "$C_RESET"; }
+
+# Fila de la caja de estado: etiqueta + valor, todo en verde.
+# El valor se rellena por ancho en celdas (no por bytes), porque la barra
+# usa █ y ░ multibyte.
+info_row() {
+    local label=$1 value=$2
+    printf '%b│%b  %b%-11s : %b  %b│%b\n' \
+        "$C_CYAN" "$C_RESET" "$C_GREEN" "$label" \
+        "$(pad_to "$value" 38)" "$C_RESET" "$C_CYAN"
+}
+
+# Barra de sección (MENU / TOOLS / WEB PANEL): fondo cian, texto centrado
+section_bar() {
+    local text=$1 pad=$(( (56 - ${#text}) / 2 ))
+    printf '%b%*s%s%*s%b\n' "$C_BG_CYAN" "$pad" "" "$text" "$((56 - pad - ${#text}))" "" "$C_RESET"
+}
+
+# Fila de menú a dos columnas: número en cian, etiqueta en verde.
+# Las etiquetas se rellenan por ancho en celdas, no por bytes (emojis).
+menu_row() {
+    # Una sola columna (lado derecho vacío): rellena todo el ancho de la caja.
+    if [[ -z "$3" ]]; then
+        printf '%b│%b  %b[%s]%b %b%s %b│%b\n' \
+            "$C_CYAN" "$C_RESET" "$C_CYAN_B" "$1" "$C_RESET" "$C_GREEN" "$(pad_to "$2" 48)" \
+            "$C_CYAN" "$C_RESET"
+        return
+    fi
+    printf '%b│%b  %b[%s]%b %b%s %b[%s]%b %b%s %b│%b\n' \
+        "$C_CYAN" "$C_RESET" "$C_CYAN_B" "$1" "$C_RESET" "$C_GREEN" "$(pad_to "$2" 21)" \
+        "$C_CYAN_B" "$3" "$C_RESET" "$C_GREEN" "$(pad_to "$4" 21)" \
+        "$C_CYAN" "$C_RESET"
+}
+
+draw_header() {
+    local cpu ram
+    cpu=$(get_cpu_pct)
+    ram=$(get_ram_pct)
+    clear
+    draw_title
+    echo
+    box_top
+    info_row "OS"        "$(get_os)"
+    info_row "UPTIME"    "$(get_uptime)"
+    info_row "CPU USAGE" "$(bar "$cpu" 16)"
+    info_row "RAM USAGE" "$(bar "$ram" 16)"
+    info_row "IPv4"      "$(get_ipv4)"
+    info_row "DOMAIN"    "$(get_domain)"
+    box_bottom
+    echo
+    box_top
+    printf '%b│%b   NGINX : %s    XRAY : %s    WS : %s          %b│%b\n' \
+        "$C_CYAN" "$C_RESET" \
+        "$(svc_status nginx)" "$(svc_status xray)" "$(ws_status)" \
+        "$C_CYAN" "$C_RESET"
+    box_bottom
+    echo
+}
+
+draw_menu() {
+    box_top
+    section_bar "MENU"
+    menu_row "01" "• MENU SSH🔥"            "02" "• MENU V2RAY⭐"
+    menu_row "03" "• INSTALAR PROTOCOLOS" "04" "• GENERADOR DE KEY🤖"
+    menu_row "05" "• HERRAMIENTAS🔐" "" ""
+    echo
+    menu_row "00" "• SALIR"                "88" "• REINICIAR VPS"
+    box_bottom
+    echo
+    printf '%b  MUSTAFA v%s — v2install%b\n' "$C_GREEN" "$VERSION" "$C_RESET"
+}
+
+# --- Acciones --------------------------------------------------------------------
+pause() {
+    echo
+    read -rp "  Presiona Enter para volver al menú..." _ || true
+}
+
+do_reboot() {
+    echo
+    read -rp "  ¿Reiniciar el VPS? (s/N): " ans || true
+    case "$ans" in
+        s|S|y|Y) echo "  Reiniciando..."; sleep 1; reboot ;;
+        *) echo "  Cancelado."; sleep 1 ;;
+    esac
+}
+
+# --- Utilidades compartidas ------------------------------------------------------
+# Usuarios SSH del sistema (uid >= 1000, sin nobody). Uno por línea.
+ssh_users() {
+    awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' /etc/passwd 2>/dev/null | sort
+}
+
+# Vencimiento de un usuario (fecha o "nunca")
+ssh_expiry() {
+    local u=$1 e
+    e="$(chage -l "$u" 2>/dev/null | awk -F': ' '/Account expires/{print $2}')"
+    echo "${e:-nunca}"
+}
+
+# ¿El usuario está bloqueado? (L = bloqueado, P = activo)
+ssh_locked() {
+    local u=$1 s
+    s="$(passwd -S "$u" 2>/dev/null | awk '{print $2}')"
+    [[ "$s" == "L" ]] && echo "bloqueado" || echo "activo"
+}
+
+# Usuarios SSH con sesión activa (distintos, sin root)
+ssh_connected_users() {
+    ps -eo user,comm 2>/dev/null | awk '$2 ~ /^sshd:/ {print $1}' | grep -v '^root$' | sort -u
+}
+
+# --- [01] MENU SSH — administrador de usuarios --------------------------------
+# Estilo La Casita: crear / remover / bloquear / editar / renovar /
+# mostrar / conectados / eliminar vencidos. Solo usuarios del sistema.
+
+ssh_create() {
+    local user pass days exp
+    echo
+    read -rp "  Nombre de usuario: " user || return
+    if [[ ! "$user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+        echo "  Nombre no válido (minúsculas, sin espacios, empieza con letra)."
+        return
+    fi
+    if id "$user" >/dev/null 2>&1; then
+        echo "  El usuario '$user' ya existe."
+        return
+    fi
+    read -rp "  Contraseña (vacía = aleatoria): " pass || return
+    [[ -z "$pass" ]] && pass="$(head -c 9 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 12)"
+    read -rp "  Días de vigencia (vacío = 30): " days || return
+    [[ -z "$days" ]] && days=30
+    [[ "$days" =~ ^[0-9]+$ ]] || { echo "  Días no válidos."; return; }
+    exp="$(date -d "+$days days" +%Y-%m-%d)"
+    useradd -m -s /bin/bash "$user" || { echo "  No se pudo crear el usuario."; return; }
+    printf '%s:%s\n' "$user" "$pass" | chpasswd || { echo "  No se pudo poner la contraseña."; return; }
+    chage -E "$exp" "$user"
+    echo
+    printf '  Usuario creado: %b%s%b\n' "$C_GREEN_B" "$user" "$C_RESET"
+    printf '  Contraseña    : %s\n' "$pass"
+    printf '  Vence         : %s (%s días)\n' "$exp" "$days"
+}
+
+ssh_delete() {
+    local user ans
+    echo
+    read -rp "  Usuario a remover: " user || return
+    case "$user" in
+        root|ubuntu|"") echo "  No se puede remover ese usuario."; return ;;
+    esac
+    id "$user" >/dev/null 2>&1 || { echo "  El usuario '$user' no existe."; return; }
+    read -rp "  ¿Remover '$user' y borrar su carpeta? (s/N): " ans || return
+    case "$ans" in
+        s|S|y|Y) pkill -u "$user" 2>/dev/null || true
+                 userdel -r "$user" 2>/dev/null || userdel "$user"
+                 echo "  Usuario '$user' removido." ;;
+        *) echo "  Cancelado." ;;
+    esac
+}
+
+ssh_lock_toggle() {
+    local user action
+    echo
+    read -rp "  Usuario: " user || return
+    id "$user" >/dev/null 2>&1 || { echo "  El usuario '$user' no existe."; return; }
+    printf '  Estado actual: %s\n' "$(ssh_locked "$user")"
+    read -rp "  [B]loquear o [D]esbloquear: " action || return
+    case "$action" in
+        b|B) passwd -l "$user" >/dev/null && echo "  Usuario '$user' bloqueado." ;;
+        d|D) passwd -u "$user" >/dev/null && echo "  Usuario '$user' desbloqueado." ;;
+        *) echo "  Opción no válida." ;;
+    esac
+}
+
+ssh_edit() {
+    local user pass
+    echo
+    read -rp "  Usuario: " user || return
+    id "$user" >/dev/null 2>&1 || { echo "  El usuario '$user' no existe."; return; }
+    read -rp "  Nueva contraseña (vacía = aleatoria): " pass || return
+    [[ -z "$pass" ]] && pass="$(head -c 9 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 12)"
+    printf '%s:%s\n' "$user" "$pass" | chpasswd && {
+        printf '  Contraseña de %b%s%b cambiada: %s\n' "$C_GREEN_B" "$user" "$C_RESET" "$pass"
+    }
+}
+
+ssh_renew() {
+    local user days cur base new
+    echo
+    read -rp "  Usuario: " user || return
+    id "$user" >/dev/null 2>&1 || { echo "  El usuario '$user' no existe."; return; }
+    read -rp "  Días a agregar: " days || return
+    [[ "$days" =~ ^[0-9]+$ ]] || { echo "  Días no válidos."; return; }
+    cur="$(ssh_expiry "$user")"
+    if [[ "$cur" == "never" || "$cur" == "nunca" ]]; then
+        base="$(date +%Y-%m-%d)"
+    else
+        # Si ya venció, se cuenta desde hoy; si no, desde su vencimiento.
+        if [[ "$(date -d "$cur" +%s 2>/dev/null || echo 0)" -lt "$(date +%s)" ]]; then
+            base="$(date +%Y-%m-%d)"
+        else
+            base="$cur"
+        fi
+    fi
+    new="$(date -d "$base +$days days" +%Y-%m-%d)"
+    chage -E "$new" "$user" && printf '  %b%s%b ahora vence: %s (antes: %s)\n' "$C_GREEN_B" "$user" "$C_RESET" "$new" "$cur"
+}
+
+ssh_list() {
+    local u exp st n=0
+    echo
+    printf '  %-16s %-12s %-10s\n' "USUARIO" "VENCE" "ESTADO"
+    printf '  %-16s %-12s %-10s\n' "----------------" "------------" "----------"
+    while read -r u; do
+        [[ -z "$u" ]] && continue
+        n=$((n+1))
+        exp="$(ssh_expiry "$u")"
+        st="$(ssh_locked "$u")"
+        printf '  %-16s %-12s %-10s\n' "$u" "$exp" "$st"
+    done < <(ssh_users)
+    [[ $n -eq 0 ]] && echo "  (sin usuarios SSH creados)"
+    echo
+    printf '  Total: %s usuario(s)\n' "$n"
+}
+
+ssh_connected() {
+    local u n=0 total=0
+    echo
+    printf '  Usuarios con sesión SSH activa:\n'
+    while read -r u; do
+        [[ -z "$u" ]] && continue
+        n=$((n+1))
+        printf '  - %s (%s sesión(es))\n' "$u" "$(ps -eo user,comm 2>/dev/null | awk -v u="$u" '$1==u && $2 ~ /^sshd:/' | wc -l)"
+    done < <(ssh_connected_users)
+    total="$(ps -eo comm 2>/dev/null | grep -c '^sshd:')"
+    [[ $n -eq 0 ]] && echo "  (nadie conectado)"
+    echo
+    printf '  Conectados: %s usuario(s), %s sesión(es) sshd en total\n' "$n" "$total"
+}
+
+ssh_delete_expired() {
+    local u exp exp_epoch now ans n=0
+    now="$(date +%s)"
+    echo
+    echo "  Usuarios vencidos:"
+    while read -r u; do
+        [[ -z "$u" ]] && continue
+        exp="$(ssh_expiry "$u")"
+        [[ "$exp" == "never" || "$exp" == "nunca" ]] && continue
+        exp_epoch="$(date -d "$exp" +%s 2>/dev/null || echo 0)"
+        if [[ $exp_epoch -lt $now ]]; then
+            n=$((n+1))
+            printf '  - %s (venció %s)\n' "$u" "$exp"
+        fi
+    done < <(ssh_users)
+    [[ $n -eq 0 ]] && { echo "  (ningún usuario vencido)"; return; }
+    read -rp "  ¿Eliminar los $n vencidos? (s/N): " ans || return
+    case "$ans" in
+        s|S|y|Y)
+            while read -r u; do
+                [[ -z "$u" ]] && continue
+                exp="$(ssh_expiry "$u")"
+                [[ "$exp" == "never" || "$exp" == "nunca" ]] && continue
+                exp_epoch="$(date -d "$exp" +%s 2>/dev/null || echo 0)"
+                if [[ $exp_epoch -lt $now ]]; then
+                    pkill -u "$u" 2>/dev/null || true
+                    userdel -r "$u" 2>/dev/null || userdel "$u" 2>/dev/null || true
+                    echo "  Eliminado: $u"
+                fi
+            done < <(ssh_users)
+            ;;
+        *) echo "  Cancelado." ;;
+    esac
+}
+
+ssh_menu() {
+    local opt total conn
+    while true; do
+        clear
+        total="$(ssh_users | wc -l)"
+        conn="$(ssh_connected_users | wc -l)"
+        printf '%b\n  ============ MENU SSH — ADMINISTRADOR DE USUARIOS ============\n%b' "$C_CYAN_B" "$C_RESET"
+        printf '  Usuarios: %s    Conectados: %s\n' "$total" "$conn"
+        echo
+        printf '  [1] Crear nuevo usuario\n'
+        printf '  [2] Remover usuario\n'
+        printf '  [3] Bloquear / Desbloquear usuario\n'
+        printf '  [4] Editar usuario (cambiar contraseña)\n'
+        printf '  [5] Renovar usuario\n'
+        printf '  [6] Mostrar cuentas\n'
+        printf '  [7] Usuarios conectados\n'
+        printf '  [8] Eliminar usuarios vencidos\n'
+        printf '  [0] Volver\n'
+        echo
+        read -rp "  Seleccione una opción: " opt || return 0
+        case "$opt" in
+            1) ssh_create; pause ;;
+            2) ssh_delete; pause ;;
+            3) ssh_lock_toggle; pause ;;
+            4) ssh_edit; pause ;;
+            5) ssh_renew; pause ;;
+            6) ssh_list; pause ;;
+            7) ssh_connected; pause ;;
+            8) ssh_delete_expired; pause ;;
+            0) return 0 ;;
+            *) echo "  Opción no válida: $opt"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- [02] MENU V2RAY — cuentas UUID de Xray ------------------------------------
+XRAY_CONF="/usr/local/etc/xray/config.json"
+XRAY_BIN="/usr/local/bin/xray/xray"
+INFO_FILE="/etc/mustafa/info"
+
+info_val() {
+    local key=$1 val=""
+    if [[ -f "$INFO_FILE" ]]; then
+        val="$(grep "^${key}=" "$INFO_FILE" 2>/dev/null | cut -d= -f2- || true)"
+    fi
+    printf '%s' "$val"
+}
+
+v2ray_uuids() {
+    [[ -f "$XRAY_CONF" ]] || return
+    jq -r '.inbounds[].settings.clients[]?.id' "$XRAY_CONF" 2>/dev/null | sort -u
+}
+
+v2ray_host() {
+    local d
+    d="$(info_val domain)"
+    if [[ -n "$d" && "$d" != "sin-dominio" && "$d" != "sin configurar" ]]; then
+        echo "$d"
+    else
+        get_ipv4
+    fi
+}
+
+# Imprime los 3 enlaces (VLESS Reality, VMess WS, VLESS WS) de un UUID
+# Pregunta qué transporte mostrar en los enlaces de V2Ray.
+# Devuelve por stdout: todos | reality | ws | xhttp  (Enter = todos).
+# El menú se escribe a stderr para que la captura $(...) solo tome la respuesta
+# (una función que imprime a stdout NO debe capturarse con $(...)).
+v2ray_elegir_transporte() {
+    local r
+    {
+        echo
+        echo "  Transporte a mostrar:"
+        echo "    [1] Todos (Reality + WebSocket + XHTTP)"
+        echo "    [2] Solo Reality"
+        echo "    [3] Solo WebSocket"
+        echo "    [4] Solo XHTTP"
+    } >&2
+    read -rp "  Elige [1-4] (Enter = Todos): " r
+    case "$r" in
+        2) echo "reality" ;;
+        3) echo "ws" ;;
+        4) echo "xhttp" ;;
+        *) echo "todos" ;;
+    esac
+}
+
+v2ray_links() {
+    local uuid=$1 name=$2 host=$3 transp=${4:-todos} pub sid
+    pub="$(info_val reality_public)"; sid="$(info_val reality_shortid)"
+    echo
+    printf '  %b%s%b  (%s)\n' "$C_GREEN_B" "$name" "$C_RESET" "$uuid"
+    if [[ "$transp" == todos || "$transp" == reality ]]; then
+        printf '  VLESS Reality: vless://%s@%s:443?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=%s&sid=%s&type=tcp&flow=xtls-rprx-vision#%s\n' \
+            "$uuid" "$host" "$pub" "$sid" "$name"
+    fi
+    if [[ "$transp" == todos || "$transp" == ws ]]; then
+        local vmess_json
+        vmess_json="$(jq -n --arg ps "$name" --arg add "$host" --arg id "$uuid" \
+            '{v:"2",ps:$ps,add:$add,port:"80",id:$id,aid:"0",net:"ws",type:"none",host:$add,path:"/vmess",tls:""}' 2>/dev/null | base64 -w0)"
+        printf '  VMess WS     : vmess://%s\n' "$vmess_json"
+        printf '  VLESS WS     : vless://%s@%s:80?encryption=none&security=none&type=ws&host=%s&path=/vless#%s\n' \
+            "$uuid" "$host" "$host" "$name"
+    fi
+    if [[ "$transp" == todos || "$transp" == xhttp ]]; then
+        printf '  VLESS XHTTP  : vless://%s@%s:80?encryption=none&security=none&type=xhttp&host=%s&path=/xhttp#%s\n' \
+            "$uuid" "$host" "$host" "$name"
+    fi
+}
+
+v2ray_show() {
+    local host uuid i=0 principal transp
+    if [[ ! -f "$XRAY_CONF" ]]; then
+        echo "  Xray no está instalado (falta $XRAY_CONF)."
+        return
+    fi
+    host="$(v2ray_host)"
+    principal="$(info_val xray_uuid)"
+    transp="$(v2ray_elegir_transporte)"
+    echo
+    while read -r uuid; do
+        [[ -z "$uuid" ]] && continue
+        i=$((i+1))
+        if [[ "$uuid" == "$principal" ]]; then
+            v2ray_links "$uuid" "MUSTAFA-PRINCIPAL" "$host" "$transp"
+        else
+            v2ray_links "$uuid" "MUSTAFA-$i" "$host" "$transp"
+        fi
+    done < <(v2ray_uuids)
+    [[ $i -eq 0 ]] && echo "  (sin cuentas UUID en la configuración de Xray)"
+}
+
+v2ray_add() {
+    local uuid tmp
+    if [[ ! -f "$XRAY_CONF" ]]; then
+        echo "  Xray no está instalado."
+        return
+    fi
+    command -v jq >/dev/null 2>&1 || { echo "  Falta jq (lo instala install.sh)."; return; }
+    uuid="$(cat /proc/sys/kernel/random/uuid)"
+    tmp="$(mktemp)"
+    cp "$XRAY_CONF" "$XRAY_CONF.bak"
+    if ! jq --arg uuid "$uuid" \
+        '.inbounds |= map(if (.settings.clients | length) > 0 then .settings.clients += [(.settings.clients[0] | .id = $uuid)] else . end)' \
+        "$XRAY_CONF" > "$tmp" 2>/dev/null; then
+        echo "  No se pudo editar la configuración."
+        rm -f "$tmp"; return
+    fi
+    mv "$tmp" "$XRAY_CONF"
+    if [[ -x "$XRAY_BIN" ]]; then
+        if ! "$XRAY_BIN" run -test -config "$XRAY_CONF" >/dev/null 2>&1; then
+            mv "$XRAY_CONF.bak" "$XRAY_CONF"
+            echo "  La configuración nueva no pasó la prueba de Xray; se restauró la anterior."
+            return
+        fi
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl restart xray 2>/dev/null || echo "  (no se pudo reiniciar xray — revisa su estado)"
+    fi
+    echo
+    printf '  Nuevo usuario UUID: %b%s%b\n' "$C_GREEN_B" "$uuid" "$C_RESET"
+    v2ray_links "$uuid" "MUSTAFA-NUEVO" "$(v2ray_host)" "$(v2ray_elegir_transporte)"
+}
+
+v2ray_del() {
+    local uuids=() i=0 n sel uuid tmp
+    if [[ ! -f "$XRAY_CONF" ]]; then
+        echo "  Xray no está instalado."
+        return
+    fi
+    echo
+    while read -r uuid; do
+        [[ -z "$uuid" ]] && continue
+        i=$((i+1)); uuids+=("$uuid")
+        printf '  [%s] %s\n' "$i" "$uuid"
+    done < <(v2ray_uuids)
+    [[ $i -eq 0 ]] && { echo "  (sin cuentas UUID)"; return; }
+    read -rp "  Número del UUID a eliminar: " n || return
+    [[ "$n" =~ ^[0-9]+$ ]] && [[ $n -ge 1 && $n -le $i ]] || { echo "  Número no válido."; return; }
+    uuid="${uuids[$((n-1))]}"
+    tmp="$(mktemp)"
+    cp "$XRAY_CONF" "$XRAY_CONF.bak"
+    if ! jq --arg uuid "$uuid" \
+        '.inbounds |= map(.settings.clients |= map(select(.id != $uuid)))' \
+        "$XRAY_CONF" > "$tmp" 2>/dev/null; then
+        echo "  No se pudo editar la configuración."
+        rm -f "$tmp"; return
+    fi
+    mv "$tmp" "$XRAY_CONF"
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl restart xray 2>/dev/null || true
+    fi
+    echo "  UUID eliminado: $uuid"
+}
+
+v2ray_restart() {
+    local st
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "  (systemctl no disponible)"
+        return
+    fi
+    if systemctl restart xray 2>/dev/null; then
+        st="$(systemctl is-active xray 2>/dev/null || true)"
+        echo "  Xray reiniciado: ${st:-?}"
+    else
+        echo "  No se pudo reiniciar xray."
+    fi
+}
+
+v2ray_status() {
+    local st
+    echo
+    st="sin systemctl"
+    if command -v systemctl >/dev/null 2>&1; then
+        st="$(systemctl is-active xray 2>/dev/null || true)"
+        [[ -z "$st" ]] && st="desconocido"
+    fi
+    printf '  Servicio : %s\n' "$st"
+    [[ -x "$XRAY_BIN" ]] && printf '  Versión  : %s\n' "$("$XRAY_BIN" version 2>/dev/null | head -n 1)"
+    echo "  Puertos  :"
+    if command -v ss >/dev/null 2>&1; then
+        ss -tlnp 2>/dev/null | grep -i xray | awk '{printf "  %s %s\n", $1, $4}' || echo "  (xray no está escuchando)"
+    else
+        echo "  (ss no disponible)"
+    fi
+    echo "  Últimos registros:"
+    if command -v journalctl >/dev/null 2>&1; then
+        journalctl -u xray -n 15 --no-pager 2>/dev/null | sed 's/^/  /' || echo "  (sin registros)"
+    else
+        echo "  (journalctl no disponible)"
+    fi
+}
+
+v2ray_install() {
+    if [[ -x "$XRAY_BIN" ]] && systemctl is-active --quiet xray 2>/dev/null; then
+        echo "  Xray ya está instalado y activo."
+        return
+    fi
+    if [[ ! -f "$INSTALL_DIR/xray.sh" ]]; then
+        echo "  El instalador $INSTALL_DIR/xray.sh no está en este VPS."
+        echo "  Descargándolo del repo..."
+        if curl -fsSL -o "$INSTALL_DIR/xray.sh" "https://raw.githubusercontent.com/titlan/v2install/main/install/xray.sh"; then
+            chmod +x "$INSTALL_DIR/xray.sh"
+        else
+            echo "  No se pudo descargar xray.sh."
+            echo "  Cópialo a mano: de v2install/install/xray.sh a /etc/mustafa/install/xray.sh"
+            return
+        fi
+    fi
+    echo
+    echo "  Instalando Xray (V2Ray)..."
+    echo
+    bash "$INSTALL_DIR/xray.sh" || echo "  (el instalador terminó con error — revisa la salida)"
+}
+
+v2ray_uninstall() {
+    if [[ ! -f "$XRAY_CONF" && ! -x "$XRAY_BIN" ]]; then
+        echo "  Xray no está instalado."
+        return
+    fi
+    echo "  Esto borra Xray, su config y TODAS las cuentas UUID."
+    read -rp "  ¿Desinstalar Xray? [s/N]: " c || return
+    [[ "$c" == "s" || "$c" == "S" ]] || { echo "  Cancelado."; return; }
+    if [[ -f "$INSTALL_DIR/xray.sh" ]]; then
+        bash "$INSTALL_DIR/xray.sh" --uninstall || echo "  (la desinstalación terminó con error — revisa la salida)"
+    else
+        echo "  No está $INSTALL_DIR/xray.sh; borrando a mano..."
+        systemctl stop xray 2>/dev/null || true
+        systemctl disable xray 2>/dev/null || true
+        rm -f /etc/systemd/system/xray.service
+        rm -rf /usr/local/bin/xray /usr/local/etc/xray /usr/local/share/xray /var/log/xray
+        sed -i '/^xray_tag=/d; /^xray_uuid=/d; /^reality_public=/d; /^reality_shortid=/d' /etc/mustafa/info 2>/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
+        echo "  Xray desinstalado."
+    fi
+}
+
+v2ray_menu() {
+    local opt st
+    while true; do
+        clear
+        st="desconocido"
+        if command -v systemctl >/dev/null 2>&1; then
+            st="$(systemctl is-active xray 2>/dev/null || true)"
+            [[ -z "$st" ]] && st="desconocido"
+        fi
+        printf '%b\n  ============ MENU V2RAY ============\n%b' "$C_CYAN_B" "$C_RESET"
+        printf '  Xray: %s\n' "$st"
+        echo
+        printf '  [1] Mostrar cuentas y enlaces\n'
+        printf '  [2] Agregar usuario UUID\n'
+        printf '  [3] Eliminar usuario UUID\n'
+        printf '  [4] Reiniciar Xray\n'
+        printf '  [5] Estado de Xray\n'
+        printf '  [6] Instalar V2Ray\n'
+        printf '  [7] Desinstalar V2Ray\n'
+        printf '  [0] Volver\n'
+        echo
+        read -rp "  Seleccione una opción: " opt || return 0
+        case "$opt" in
+            1) v2ray_show; pause ;;
+            2) v2ray_add; pause ;;
+            3) v2ray_del; pause ;;
+            4) v2ray_restart; pause ;;
+            5) v2ray_status; pause ;;
+            6) v2ray_install; pause ;;
+            7) v2ray_uninstall; pause ;;
+            0) return 0 ;;
+            *) echo "  Opción no válida: $opt"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- [03] INSTALAR PROTOCOLOS ---------------------------------------------------
+WS_CONF="/etc/mustafa-ws/config"
+
+ws_conf() {
+    local key=$1 val=""
+    if [[ -f "$WS_CONF" ]]; then
+        val="$(grep "^${key}=" "$WS_CONF" 2>/dev/null | cut -d= -f2- || true)"
+    fi
+    printf '%s' "$val"
+}
+
+# Estado de una unidad: [ON] / [OFF] / [--] (no instalada)
+unit_state() {
+    local u=$1
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet "$u" 2>/dev/null; then
+            printf '%b[ON]%b' "$C_GREEN_B" "$C_RESET"; return
+        fi
+    fi
+    if [[ -f "/etc/systemd/system/$u.service" || -f "/etc/systemd/system/$u.timer" \
+       || -f "/lib/systemd/system/$u.service" || -f "/lib/systemd/system/$u.timer" ]]; then
+        printf '%b[OFF]%b' "$C_RED_B" "$C_RESET"; return
+    fi
+    printf '%b[--]%b' "$C_GREEN" "$C_RESET"
+}
+
+# Puerto actual de un protocolo: archivo de estado, o su servicio/config,
+# o el puerto por defecto. Para Stunnel4, si no hay nada instalado, se
+# replica la autodetección del instalador (443 libre / 4443 si Xray lo ocupa).
+proto_port() {
+    local key=$1 def=$2 p=""
+    [[ -f "/etc/mustafa/ports/$key" ]] && p="$(cat "/etc/mustafa/ports/$key" 2>/dev/null || true)"
+    if [[ -z "$p" ]]; then
+        case "$key" in
+            badvpn)     p="$(grep -o -- '--listen-addr 127.0.0.1:[0-9]*' /etc/systemd/system/badvpn.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            stunnel4)   p="$(awk -F'=' '/^accept[[:space:]]*=/{gsub(/ /,"",$2); print $2; exit}' /etc/stunnel/stunnel.conf 2>/dev/null || true)"
+                        if [[ -z "$p" ]]; then
+                            if ss -tln 2>/dev/null | awk '$4 ~ /:443$/ {found=1} END {exit !found}'; then p="4443"; else p="443"; fi
+                        fi ;;
+            hcr)        p="$(grep -o -- '-listen :[0-9]*' /etc/systemd/system/hcr-server.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            bhttp)      p="$(grep -o -- '-listen 0.0.0.0:[0-9]*' /etc/systemd/system/bhttp-server.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            chttp)      p="$(grep -o -- '--addr :[0-9]*' /etc/systemd/system/chttp.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            v2socks)    p="$(grep -o -- '--signal-addr :[0-9]*' /etc/systemd/system/v2socks.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            mustafa-ws) p="$(grep '^LISTEN=' /etc/mustafa-ws/config 2>/dev/null | cut -d: -f2- || true)" ;;
+            checkuser)  p="$(grep -o -- '^Environment=CHECKUSER_PORT=[0-9]*' /etc/systemd/system/checkuser.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            hysteria2)  p="$(grep -o -- '^listen: :[0-9]*' /etc/hysteria2/config.yaml 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            wsplus)     p="$(grep -o -- '--listen :[0-9]*' /etc/systemd/system/wsplus.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            doh)        p="$(grep -o -- '--listen :[0-9]*' /etc/systemd/system/doh.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+        esac
+    fi
+    [[ -z "$p" ]] && p="$def"
+    printf '%s' "$p"
+}
+
+# Instala un protocolo en el puerto dado (el instalador escribe el puerto
+# en /etc/mustafa/ports/<clave>; BHTTP lo escribe el menú porque su
+# instalador ya trae sus propias opciones --install/--port).
+proto_do_install() {
+    local key=$1 script=$2 envvar=$3 port=$4
+    if [[ ! -f "$INSTALL_DIR/$script" ]]; then
+        echo
+        echo "  No está el instalador $INSTALL_DIR/$script."
+        echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+        return
+    fi
+    echo
+    if [[ -n "$port" ]]; then
+        echo "  Instalando $key en el puerto $port..."
+    else
+        echo "  Instalando $key..."
+    fi
+    echo
+    if [[ "$key" == "bhttp" ]]; then
+        if bash "$INSTALL_DIR/$script" --install --port "$port"; then
+            mkdir -p /etc/mustafa/ports
+            echo "$port" > "/etc/mustafa/ports/$key"
+        else
+            echo "  (el instalador terminó con error — revisa la salida)"
+        fi
+    elif [[ -z "$envvar" ]]; then
+        bash "$INSTALL_DIR/$script" || echo "  (el instalador terminó con error — revisa la salida)"
+    else
+        env "$envvar=$port" bash "$INSTALL_DIR/$script" || echo "  (el instalador terminó con error — revisa la salida)"
+    fi
+}
+
+proto_do_uninstall() {
+    local key=$1 script=$2
+    if [[ ! -f "$INSTALL_DIR/$script" ]]; then
+        echo
+        echo "  No está el instalador $INSTALL_DIR/$script."
+        echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+        return
+    fi
+    echo
+    echo "  Desinstalando $key..."
+    echo
+    bash "$INSTALL_DIR/$script" --uninstall || echo "  (la desinstalación terminó con error — revisa la salida)"
+    rm -f "/etc/mustafa/ports/$key"
+}
+
+# Submenú de un protocolo: instalar / desinstalar / cambiar puerto.
+proto_menu() {
+    local key=$1 name="" script="" unit="" def="" envvar="" has_port=1
+    case "$key" in
+        badvpn)     name="BadVPN";     script="badvpn.sh";     unit="badvpn";            def="7300"; envvar="BADVPN_PORT" ;;
+        stunnel4)   name="Stunnel4";   script="stunnel4.sh";   unit="stunnel4";          def="443";  envvar="STUNNEL_PORT" ;;
+        hcr)        name="HCR";        script="hcr.sh";        unit="hcr-server";        def="8080"; envvar="HCR_PORT" ;;
+        bhttp)      name="BHTTP";      script="bhttp.sh";      unit="bhttp-server";      def="8087"; envvar="BHTTP_PORT" ;;
+        chttp)      name="CHTTP";      script="chttp.sh";      unit="chttp";             def="8445"; envvar="CHTTP_PORT" ;;
+        v2socks)    name="V2SOCKS";    script="v2socks.sh";    unit="v2socks";           def="8444"; envvar="V2SOCKS_PORT" ;;
+        mustafa-ws) name="mustafa-ws"; script="mustafa-ws.sh"; unit="mustafa-ws";        def="444";  envvar="WS_PORT" ;;
+        checkuser)  name="CheckUser";  script="checkuser.sh";  unit="checkuser";         def="8888"; envvar="CHECKUSER_PORT" ;;
+        hysteria2)  name="Hysteria2";  script="hysteria2.sh";  unit="hysteria2";         def="443";  envvar="HYSTERIA2_PORT" ;;
+        wsplus)     name="WSPLUS";     script="wsplus.sh";     unit="wsplus";            def="8081"; envvar="WSPLUS_PORT" ;;
+        doh)        name="DOH";        script="doh.sh";        unit="doh";               def="8053"; envvar="DOH_PORT" ;;
+        monitor)    name="Monitor App"; script="monitor.sh";   unit="monitor-mustafa.timer"; def=""; envvar=""; has_port=0 ;;
+        *) echo "  Protocolo desconocido: $key"; return ;;
+    esac
+    local opt port cur ans
+    while true; do
+        clear
+        cur="$(proto_port "$key" "$def")"
+        printf '%b\n  ============ %s ============\n%b' "$C_CYAN_B" "$name" "$C_RESET"
+        echo
+        printf '  Estado : %s\n' "$(unit_state "$unit")"
+        [[ "$has_port" == 1 ]] && printf '  Puerto : %s\n' "$cur"
+        echo
+        printf '  [1] Instalar %s\n' "$name"
+        printf '  [2] Desinstalar %s\n' "$name"
+        [[ "$has_port" == 1 ]] && printf '  [3] Cambiar puerto (actual: %s)\n' "$cur"
+        printf '  [0] Volver\n'
+        echo
+        read -rp "  Seleccione una opción: " opt || return 0
+        case "$opt" in
+            1)
+                port="$cur"
+                if [[ "$has_port" == 1 ]]; then
+                    read -rp "  Puerto para $name [$cur]: " port || return 0
+                    [[ -z "$port" ]] && port="$cur"
+                    case "$port" in ""|*[!0-9]*) echo "  Puerto no válido."; sleep 1; continue ;; esac
+                    port="$((10#$port))"
+                    if [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then echo "  Puerto no válido (1-65535)."; sleep 1; continue; fi
+                fi
+                proto_do_install "$key" "$script" "$envvar" "$port"
+                pause ;;
+            2)
+                read -rp "  ¿Desinstalar $name? Se borra el servicio y su configuración [s/N]: " ans || return 0
+                [[ "$ans" == "s" || "$ans" == "S" ]] || continue
+                proto_do_uninstall "$key" "$script"
+                pause ;;
+            3)
+                [[ "$has_port" == 1 ]] || { echo "  $name no tiene puerto."; sleep 1; continue; }
+                read -rp "  Nuevo puerto para $name (actual: $cur): " port || return 0
+                [[ -z "$port" ]] && { echo "  Sin cambio."; sleep 1; continue; }
+                case "$port" in ""|*[!0-9]*) echo "  Puerto no válido."; sleep 1; continue ;; esac
+                port="$((10#$port))"
+                if [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then echo "  Puerto no válido (1-65535)."; sleep 1; continue; fi
+                if [[ "$port" == "$cur" ]]; then echo "  Ya está en ese puerto."; sleep 1; continue; fi
+                proto_do_install "$key" "$script" "$envvar" "$port"
+                pause ;;
+            0) return 0 ;;
+            *) echo "  Opción no válida: $opt"; sleep 1 ;;
+        esac
+    done
+}
+
+protocols_menu() {
+    local opt token
+    while true; do
+        clear
+        printf '%b\n  ============ INSTALAR PROTOCOLOS ============\n%b' "$C_CYAN_B" "$C_RESET"
+        echo
+        printf '  [1] BadVPN        (UDP :%-5s)      %s\n' "$(proto_port badvpn 7300)" "$(unit_state badvpn)"
+        printf '  [2] Stunnel4      (SSL :%-5s)      %s\n' "$(proto_port stunnel4 443)" "$(unit_state stunnel4)"
+        printf '  [3] HCR           (TLS :%-5s)      %s\n' "$(proto_port hcr 8080)" "$(unit_state hcr-server)"
+        printf '  [4] BHTTP         (:%-5s)          %s\n' "$(proto_port bhttp 8087)" "$(unit_state bhttp-server)"
+        printf '  [5] CHTTP         (TLS :%-5s)      %s\n' "$(proto_port chttp 8445)" "$(unit_state chttp)"
+        printf '  [6] V2SOCKS       (señal :%-5s)    %s\n' "$(proto_port v2socks 8444)" "$(unit_state v2socks)"
+        printf '  [7] mustafa-ws    (WS :%-5s)       %s\n' "$(proto_port mustafa-ws 444)" "$(unit_state mustafa-ws)"
+        printf '  [8] CheckUser     (:%-5s)          %s\n' "$(proto_port checkuser 8888)" "$(unit_state checkuser)"
+        printf '  [9] Monitor App   (panel :80)      %s\n' "$(unit_state monitor-mustafa.timer)"
+        printf '  [10] Hysteria2    (UDP :%-5s)      %s\n' "$(proto_port hysteria2 443)" "$(unit_state hysteria2)"
+        printf '  [11] WSPLUS        (TLS :%-5s)      %s\n' "$(proto_port wsplus 8081)" "$(unit_state wsplus)"
+        printf '  [12] DOH           (TLS :%-5s)      %s\n' "$(proto_port doh 8053)" "$(unit_state doh)"
+        printf '  [0] Volver\n'
+        token="$(ws_conf TOKEN)"
+        [[ -n "$token" ]] && printf '\n  TOKEN WS (mustafa-ws): %s\n' "$token"
+        echo
+        read -rp "  Seleccione una opción: " opt || return 0
+        case "$opt" in
+            1) proto_menu badvpn ;;
+            2) proto_menu stunnel4 ;;
+            3) proto_menu hcr ;;
+            4) proto_menu bhttp ;;
+            5) proto_menu chttp ;;
+            6) proto_menu v2socks ;;
+            7) proto_menu mustafa-ws ;;
+            8) proto_menu checkuser ;;
+            9) proto_menu monitor ;;
+            10) proto_menu hysteria2 ;;
+            11) proto_menu wsplus ;;
+            12) proto_menu doh ;;
+            0) return 0 ;;
+            *) echo "  Opción no válida: $opt"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- [04] GENERADOR DE KEY -------------------------------------------------------
+# Las keys se generan aquí y su SHA-256 se publica en el repo (keys.sha256).
+# install.sh valida la key contra ese registro. Sin registro publicado, el
+# instalador avisa y continúa (modo prueba); con registro, la key es obligatoria.
+
+keygen_generate() {
+    local nota days raw key hash creada vence
+    echo
+    read -rp "  Nota / para quién es (ej. nombre del cliente): " nota || return
+    read -rp "  Días de vigencia (0 = sin vencimiento): " days || return
+    [[ -z "$days" ]] && days=0
+    [[ "$days" =~ ^[0-9]+$ ]] || { echo "  Días no válidos."; return; }
+    raw="$(tr -dc 'A-Z2-9' < /dev/urandom | head -c 16)"
+    key="MUSTAFA-${raw:0:4}-${raw:4:4}-${raw:8:4}-${raw:12:4}"
+    hash="$(printf '%s' "$key" | sha256sum | awk '{print $1}')"
+    creada="$(date +%Y-%m-%d)"
+    if [[ "$days" -gt 0 ]]; then
+        vence="$(date -d "+$days days" +%Y-%m-%d)"
+    else
+        vence="nunca"
+    fi
+    mkdir -p "$KEYS_DIR"; chmod 700 "$KEYS_DIR"
+    printf '%s|%s|%s|%s|activa\n' "$key" "${nota:-sin nota}" "$creada" "$vence" >> "$KEYS_DB"
+    chmod 600 "$KEYS_DB"
+    printf '%s\n' "$hash" >> "$KEYS_HASHES"
+    chmod 600 "$KEYS_HASHES"
+    echo
+    printf '  KEY generada: %b%s%b\n' "$C_YELLOW" "$key" "$C_RESET"
+    printf '  Para: %s | Vence: %s\n' "${nota:-sin nota}" "$vence"
+    echo
+    echo "  Pásale esa KEY a quien va a instalar. Para que el instalador la"
+    echo "  acepte, exporta los hashes (opción 4) y súbelos como keys.sha256"
+    echo "  a la raíz de titlan/v2install."
+}
+
+keygen_list() {
+    local n=0 k nota creada vence estado
+    echo
+    if [[ ! -f "$KEYS_DB" ]]; then
+        echo "  (sin keys generadas todavía)"
+        return
+    fi
+    printf '  %-4s %-26s %-16s %-12s %-10s %-9s\n' "#" "KEY" "PARA" "CREADA" "VENCE" "ESTADO"
+    while IFS='|' read -r k nota creada vence estado; do
+        [[ -z "$k" ]] && continue
+        n=$((n+1))
+        printf '  %-4s %-26s %-16s %-12s %-10s %-9s\n' "$n" "$k" "${nota:0:16}" "$creada" "$vence" "$estado"
+    done < "$KEYS_DB"
+    [[ $n -eq 0 ]] && echo "  (sin keys generadas todavía)"
+    echo
+    printf '  Total: %s key(s)\n' "$n"
+}
+
+keygen_revoke() {
+    local n total line key hash tmp
+    total=0
+    [[ -f "$KEYS_DB" ]] && total="$(grep -c . "$KEYS_DB" 2>/dev/null || echo 0)"
+    [[ "$total" -eq 0 ]] && { echo "  (sin keys generadas todavía)"; return; }
+    keygen_list
+    echo
+    read -rp "  Número de la KEY a revocar: " n || return
+    [[ "$n" =~ ^[0-9]+$ ]] && [[ $n -ge 1 && $n -le $total ]] || { echo "  Número no válido."; return; }
+    line="$(sed -n "${n}p" "$KEYS_DB")"
+    key="$(printf '%s' "$line" | cut -d'|' -f1)"
+    hash="$(printf '%s' "$key" | sha256sum | awk '{print $1}')"
+    tmp="$(mktemp)"
+    awk -F'|' -v n="$n" 'BEGIN{OFS="|"} NR==n{$5="revocada"} {print}' "$KEYS_DB" > "$tmp" && mv "$tmp" "$KEYS_DB"
+    if [[ -f "$KEYS_HASHES" ]]; then
+        grep -v "^${hash}$" "$KEYS_HASHES" > "$tmp" && mv "$tmp" "$KEYS_HASHES"
+    fi
+    echo "  KEY revocada: $key"
+    echo "  Recuerda exportar los hashes (opción 4) y actualizar keys.sha256 en el repo."
+}
+
+keygen_export() {
+    local n=0
+    echo
+    if [[ -f "$KEYS_HASHES" ]]; then
+        n="$(grep -c . "$KEYS_HASHES" 2>/dev/null || echo 0)"
+    fi
+    printf '  Hashes activos: %s\n' "$n"
+    echo
+    echo "  Contenido de keys.sha256 (súbelo a la raíz de titlan/v2install):"
+    echo "  ----------------------------------------------------------------"
+    [[ -f "$KEYS_HASHES" ]] && cat "$KEYS_HASHES" | sed 's/^/  /'
+    echo "  ----------------------------------------------------------------"
+    echo
+    echo "  install.sh valida cada KEY contra:"
+    echo "  https://raw.githubusercontent.com/titlan/v2install/main/keys.sha256"
+}
+
+keygen_menu() {
+    local opt total
+    while true; do
+        clear
+        total=0
+        [[ -f "$KEYS_DB" ]] && total="$(grep -c . "$KEYS_DB" 2>/dev/null || echo 0)"
+        printf '%b\n  ============ GENERADOR DE KEY ============\n%b' "$C_CYAN_B" "$C_RESET"
+        printf '  Keys generadas: %s\n' "$total"
+        echo
+        printf '  [1] Generar nueva KEY\n'
+        printf '  [2] Listar KEYS\n'
+        printf '  [3] Revocar KEY\n'
+        printf '  [4] Exportar hashes (para subir al repo)\n'
+        printf '  [0] Volver\n'
+        echo
+        read -rp "  Seleccione una opción: " opt || return 0
+        case "$opt" in
+            1) keygen_generate; pause ;;
+            2) keygen_list; pause ;;
+            3) keygen_revoke; pause ;;
+            4) keygen_export; pause ;;
+            0) return 0 ;;
+            *) echo "  Opción no válida: $opt"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- [05] HERRAMIENTAS ---------------------------------------------------------
+# Fail2Ban + BBR + vnStat + respaldo + bot WhatsApp (Knightbot).
+# El instalador es install/herramientas.sh (se copia a /etc/mustafa/install/
+# con install.sh) y el respaldo es /usr/local/bin/mustafa-backup.
+# El bot WhatsApp es install/knightbot.sh (se instala desde este menú).
+herramientas_menu() {
+    local opt st_f2b st_bbr st_vn last_bk st_wa
+    while true; do
+        clear
+        st_f2b="--"; st_vn="--"; last_bk="ninguno"; st_wa="--"
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl is-active --quiet fail2ban 2>/dev/null && st_f2b="ON"
+            systemctl is-active --quiet vnstat 2>/dev/null && st_vn="ON"
+            systemctl is-active --quiet knightbot 2>/dev/null && st_wa="ON"
+        fi
+        st_bbr="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "?")"
+        last_bk="$(ls -t /root/mustafa-backup-*.tar.gz 2>/dev/null | head -n 1 || true)"
+        [[ -n "$last_bk" ]] && last_bk="$(basename "$last_bk")"
+        printf '%b\n  ============ HERRAMIENTAS 🔐 ============\n%b' "$C_CYAN_B" "$C_RESET"
+        printf '  Fail2Ban : %s\n' "$st_f2b"
+        printf '  BBR      : %s\n' "$st_bbr"
+        printf '  vnStat   : %s\n' "$st_vn"
+        printf '  Respaldo : %s\n' "$last_bk"
+        printf '  Bot WhatsApp: %s\n' "$st_wa"
+        echo
+        printf '  [1] Instalar herramientas (Fail2Ban + BBR + vnStat + respaldo)\n'
+        printf '  [2] Crear respaldo ahora\n'
+        printf '  [3] Ver tráfico (vnstat)\n'
+        printf '  [4] Ver baneos de Fail2Ban\n'
+        printf '  [5] Instalar bot WhatsApp (Knightbot)\n'
+        printf '  [6] Ver código de pareo del bot\n'
+        printf '  [7] Ver log del bot\n'
+        printf '  [8] Desinstalar bot WhatsApp\n'
+        printf '  [0] Volver\n'
+        echo
+        read -rp "  Seleccione una opción: " opt || return 0
+        case "$opt" in
+            1)
+                if [[ -f "$INSTALL_DIR/herramientas.sh" ]]; then
+                    bash "$INSTALL_DIR/herramientas.sh"
+                else
+                    echo
+                    echo "  No está el instalador $INSTALL_DIR/herramientas.sh."
+                    echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+                fi
+                pause ;;
+            2)
+                if [[ -x /usr/local/bin/mustafa-backup ]]; then
+                    echo; /usr/local/bin/mustafa-backup
+                else
+                    echo; echo "  El respaldo no está instalado. Corre primero [1]."
+                fi
+                pause ;;
+            3)
+                echo; vnstat 2>/dev/null || echo "  vnStat no está instalado. Corre primero [1]."
+                pause ;;
+            4)
+                echo; fail2ban-client status sshd 2>/dev/null || echo "  Fail2Ban no está instalado. Corre primero [1]."
+                pause ;;
+            5)
+                if [[ -f "$INSTALL_DIR/knightbot.sh" ]]; then
+                    bash "$INSTALL_DIR/knightbot.sh"
+                else
+                    echo
+                    echo "  No está el instalador $INSTALL_DIR/knightbot.sh."
+                    echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+                fi
+                pause ;;
+            6)
+                echo
+                if systemctl is-active --quiet knightbot 2>/dev/null; then
+                    local code
+                    code="$(journalctl -u knightbot -n 200 -o cat --no-pager 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -oE '[A-Za-z0-9]{4}-[A-Za-z0-9]{4}' | tail -n 1 || true)"
+                    if [[ -n "$code" ]]; then
+                        echo "  Código de pareo: $code"
+                        echo "  En WhatsApp: Ajustes > Dispositivos vinculados > Vincular dispositivo"
+                        echo "  e introduce el código. Caduca en pocos minutos."
+                    elif journalctl -u knightbot -n 100 -o cat --no-pager 2>/dev/null | grep -q "Failed to get pairing code"; then
+                        echo "  El bot no pudo pedir el código (no conecta con WhatsApp)."
+                        echo "  Revisa el log con [7] y tu internet; luego reinicia el servicio:"
+                        echo "    systemctl restart knightbot"
+                    else
+                        echo "  No hay código de pareo reciente."
+                        echo "  Si el bot ya está vinculado, no lo necesita."
+                        echo "  Si no lo está, reinicia el servicio y vuelve aquí:"
+                        echo "    systemctl restart knightbot"
+                    fi
+                else
+                    echo "  El bot no está instalado o no está activo. Corre primero [5]."
+                fi
+                pause ;;
+            7)
+                echo; journalctl -u knightbot -n 40 --no-pager 2>/dev/null || echo "  El bot no está instalado. Corre primero [5]."
+                pause ;;
+            8)
+                echo
+                read -rp "  ¿Desinstalar el bot WhatsApp (se borra la sesión)? [s/N]: " opt2 || opt2=""
+                if [[ "$opt2" == "s" || "$opt2" == "S" ]]; then
+                    if [[ -f "$INSTALL_DIR/knightbot.sh" ]]; then
+                        bash "$INSTALL_DIR/knightbot.sh" --uninstall
+                    else
+                        echo "  No está el instalador $INSTALL_DIR/knightbot.sh."
+                    fi
+                else
+                    echo "  Cancelado."
+                fi
+                pause ;;
+            0) return 0 ;;
+            *) echo "  Opción no válida: $opt"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- Bucle principal ---------------------------------------------------------------
+main() {
+    [[ $EUID -eq 0 ]] || echo "  Aviso: el menú se debe ejecutar como root para ver todos los datos."
+    while true; do
+        draw_header
+        draw_menu
+        read -rp "  Seleccione una opción: " opt || exit 0
+        case "$opt" in
+            01|1) ssh_menu ;;
+            02|2) v2ray_menu ;;
+            03|3) protocols_menu ;;
+            04|4) keygen_menu ;;
+            05|5) herramientas_menu ;;
+            00|0) clear; echo "  Hasta luego."; exit 0 ;;
+            88)   do_reboot ;;
+            *)    echo "  Opción no válida: $opt"; sleep 1 ;;
+        esac
+    done
+}
+
+main "$@"
