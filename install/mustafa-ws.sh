@@ -33,15 +33,52 @@ info() { echo "[mustafa-ws] $*"; }
 
 [[ "$(id -u)" -eq 0 ]] || fail "Ejecuta como root (sudo bash mustafa-ws.sh)."
 
+# --- Puerto --------------------------------------------------------------------
+# WS_PORT lo fija quien llama (el menú). Sin él se mantiene el puerto
+# actual (si ya está instalado) o 444.
+PORT_REQ="${WS_PORT:-}"
+port_actual() {
+    local p=""
+    [[ -f /etc/mustafa/ports/mustafa-ws ]] && p="$(cat /etc/mustafa/ports/mustafa-ws 2>/dev/null || true)"
+    if [[ -z "$p" ]]; then
+        p="$(grep '^LISTEN=' /etc/mustafa-ws/config 2>/dev/null | cut -d: -f2- || true)"
+    fi
+    [[ -z "$p" ]] && p="444"
+    printf '%s' "$p"
+}
+if [[ -n "$PORT_REQ" ]]; then
+    case "$PORT_REQ" in ""|*[!0-9]*) fail "WS_PORT debe ser un número entre 1 y 65535." ;; esac
+    PORT="$((10#$PORT_REQ))"
+    [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || fail "WS_PORT debe ser entre 1 y 65535."
+else
+    PORT="$(port_actual)"
+fi
+
+# --- Desinstalar ---------------------------------------------------------------
+if [[ "${1:-}" == "--uninstall" ]]; then
+    echo "[mustafa-ws] Desinstalando mustafa-ws..."
+    systemctl stop "$SERVICE" 2>/dev/null || true
+    systemctl disable "$SERVICE" 2>/dev/null || true
+    rm -f "/etc/systemd/system/$SERVICE.service" "$BIN"
+    rm -rf "$CONF_DIR" /etc/mustafa/ports/mustafa-ws /var/log/mustafa-ws.log
+    systemctl daemon-reload 2>/dev/null || true
+    echo "[mustafa-ws] mustafa-ws desinstalado (servicio, binario y /etc/mustafa-ws eliminados)."
+    exit 0
+fi
+
 # --- Idempotencia: si ya está instalado y activo, no se toca nada -----------
 if [[ -x "$BIN" ]] && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
-    info "mustafa-ws ya está instalado y activo."
-    if [[ -f "$CONF_DIR/config" ]]; then
-        info "  Escucha : $(grep '^LISTEN=' "$CONF_DIR/config" | cut -d= -f2) -> $(grep '^TARGET=' "$CONF_DIR/config" | cut -d= -f2)"
-        info "  TOKEN   : $(grep '^TOKEN=' "$CONF_DIR/config" | cut -d= -f2)"
+    # Si se pidió otro puerto, no salir: reconfigurar y reiniciar abajo.
+    if [[ -z "$PORT_REQ" || "$(port_actual)" == "$PORT_REQ" ]]; then
+        info "mustafa-ws ya está instalado y activo."
+        if [[ -f "$CONF_DIR/config" ]]; then
+            info "  Escucha : $(grep '^LISTEN=' "$CONF_DIR/config" | cut -d= -f2) -> $(grep '^TARGET=' "$CONF_DIR/config" | cut -d= -f2)"
+            info "  TOKEN   : $(grep '^TOKEN=' "$CONF_DIR/config" | cut -d= -f2)"
+        fi
+        systemctl --no-pager status "$SERVICE" --lines=5 || true
+        exit 0
     fi
-    systemctl --no-pager status "$SERVICE" --lines=5 || true
-    exit 0
+    info "Cambiando puerto mustafa-ws de $(port_actual) a $PORT_REQ ..."
 fi
 
 # --- Go ----------------------------------------------------------------------
@@ -55,9 +92,13 @@ go_version_ok() {
 }
 
 obtener_go() {
+    # Deja el binario "go" a usar en la variable global GO_BIN.
+    # NO se captura con $(...) : la captura corre en un subshell, donde
+    # (a) los mensajes info irían mezclados en GO_BIN y (b) el trap EXIT
+    # borraría el Go descargado antes de compilar. Los mensajes van a stderr.
     if command -v go >/dev/null 2>&1 && go_version_ok "$(command -v go)" 1 23; then
-        info "Usando Go del sistema: $(go version)"
-        command -v go
+        info "Usando Go del sistema: $(go version)" >&2
+        GO_BIN="$(command -v go)"
         return
     fi
     command -v curl >/dev/null 2>&1 || fail "Para descargar Go se necesita curl."
@@ -69,7 +110,7 @@ obtener_go() {
     esac
     tgz="$GO_VERSION.linux-$arch.tar.gz"
     GO_TMPDIR="$(mktemp -d /tmp/mustafa-ws-go.XXXXXX)"
-    info "Descargando Go $GO_VERSION ($arch) de go.dev ..."
+    info "Descargando Go $GO_VERSION ($arch) de go.dev ..." >&2
     curl -fsSL -o "$GO_TMPDIR/$tgz" "https://go.dev/dl/$tgz" ||
         { rm -rf "$GO_TMPDIR"; fail "No se pudo descargar Go."; }
     local got
@@ -80,12 +121,15 @@ obtener_go() {
     local gobin="$GO_TMPDIR/go/bin/go"
     [ -x "$gobin" ] || { rm -rf "$GO_TMPDIR"; fail "El toolchain descargado no trae el binario go."; }
     go_version_ok "$gobin" 1 23 || { rm -rf "$GO_TMPDIR"; fail "El Go descargado no es >= 1.23."; }
-    info "Go $GO_VERSION listo: $($gobin version)"
-    echo "$gobin"
+    info "Go $GO_VERSION listo: $($gobin version)" >&2
+    GO_BIN="$gobin"
 }
 
 limpiar_go_tmp() {
     [ -n "$GO_TMPDIR" ] && [ -d "$GO_TMPDIR" ] && rm -rf "$GO_TMPDIR"
+    # Siempre 0: con set -e, si esta función (trap EXIT) devuelve 1
+    # el script terminaría con exit 1 aunque todo haya ido bien.
+    return 0
 }
 trap limpiar_go_tmp EXIT
 
@@ -94,7 +138,8 @@ if [[ ! -x "$BIN" ]]; then
     for f in "$SRC_DIR/go.mod" "$SRC_DIR/main.go"; do
         [ -f "$f" ] || fail "Falta el código fuente: $f (el directorio ws-src debe estar junto a mustafa-ws.sh)."
     done
-    GO_BIN="$(obtener_go)" || exit 1
+    GO_BIN=""
+    obtener_go || exit 1
     info "Compilando mustafa-ws desde $SRC_DIR ..."
     (cd "$SRC_DIR" && GOTOOLCHAIN=local GOPROXY=off CGO_ENABLED=0 \
         "$GO_BIN" build -trimpath -ldflags "-s -w" \
@@ -124,6 +169,10 @@ else
     TOKEN="$(grep '^TOKEN=' "$CONF_DIR/config" | cut -d= -f2)"
 fi
 
+# Puerto: se aplica el pedido (WS_PORT) o se mantiene el actual.
+# El TOKEN no se toca nunca en un cambio de puerto.
+sed -i "s/^LISTEN=.*/LISTEN=0.0.0.0:$PORT/" "$CONF_DIR/config"
+
 touch /var/log/mustafa-ws.log
 chmod 644 /var/log/mustafa-ws.log
 
@@ -132,14 +181,21 @@ chmod 644 /var/log/mustafa-ws.log
     fail "Falta $SRC_DIR/mustafa-ws.service (debe estar junto a mustafa-ws.sh)."
 cp "$SRC_DIR/mustafa-ws.service" "/etc/systemd/system/$SERVICE.service"
 systemctl daemon-reload
-systemctl enable --now "$SERVICE"
+# enable --now solo no reinicia un servicio que ya corre: un cambio
+# de puerto exige reiniciar para que tome la nueva config.
+systemctl enable "$SERVICE"
+systemctl restart "$SERVICE" || true
 sleep 1
 systemctl is-active --quiet "$SERVICE" ||
     fail "El servicio no quedó activo. Revisa con: journalctl -u $SERVICE -n 50"
+ss -tln 2>/dev/null | grep -q ":$PORT " ||
+    fail "El servicio está activo pero no escucha en el puerto $PORT. Revisa: journalctl -u $SERVICE -n 50"
+mkdir -p /etc/mustafa/ports
+echo "$PORT" > /etc/mustafa/ports/mustafa-ws
 
 echo
 info "mustafa-ws instalado y corriendo."
 info "  Escucha : $(grep '^LISTEN=' "$CONF_DIR/config" | cut -d= -f2) -> $(grep '^TARGET=' "$CONF_DIR/config" | cut -d= -f2)"
 info "  TOKEN   : $TOKEN"
-info "  Uso en HTTP Custom: SSH + WebSocket, puerto 444, payload GET /$TOKEN"
+info "  Uso en HTTP Custom: SSH + WebSocket, puerto $PORT, payload GET /$TOKEN"
 info "  Logs    : journalctl -u $SERVICE -f  y  /var/log/mustafa-ws.log"

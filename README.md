@@ -48,29 +48,42 @@ sudo MUSTAFA_KEY=MUSTAFA-XXXX-XXXX-XXXX-XXXX bash install.sh [dominio]
 | Opción | Qué hace |
 | ------ | -------- |
 | `[01] MENU SSH` | Crear / remover / bloquear / editar / renovar usuarios SSH, mostrar cuentas, usuarios conectados, eliminar vencidos |
-| `[02] MENU V2RAY` | Mostrar cuentas UUID y enlaces (VLESS Reality, VMess WS, VLESS WS), agregar/eliminar UUID, reiniciar Xray, estado |
-| `[03] INSTALAR PROTOCOLOS` | Instalar cada protocolo (ver tabla). Muestra `[ON]` / `[OFF]` / `[--]` |
+| `[02] MENU V2RAY` | Mostrar cuentas UUID y enlaces (VLESS Reality, VMess WS, VLESS WS), agregar/eliminar UUID, reiniciar Xray, estado, **instalar / desinstalar V2Ray** |
+| `[03] INSTALAR PROTOCOLOS` | Cada protocolo trae **Instalar / Desinstalar / Cambiar puerto** (ver tabla). Muestra `[ON]` / `[OFF]` / `[--]` y el puerto actual |
 | `[04] GENERADOR DE KEY` | Generar / listar / revocar keys, exportar hashes para el repo |
 | `[00] SALIR` | Salir del menú |
 | `[88] REINICIAR VPS` | Reinicia el VPS (pide confirmación) |
 
 ## Protocolos (menú [03])
 
-| # | Protocolo | Puerto | Instalador |
-| - | --------- | ------ | ---------- |
+Cada protocolo tiene su propio submenú con **[1] Instalar, [2] Desinstalar
+y [3] Cambiar puerto**. Al instalar (o al cambiar el puerto) el menú
+pregunta en qué puerto escucha; si se deja en blanco usa el actual o el
+de por defecto. El puerto elegido se guarda en `/etc/mustafa/ports/<protocolo>`
+y se muestra en la lista. Cambiar el puerto reconfigura y reinicia el
+servicio (sin recompilar ni perder la configuración ni el TOKEN de
+mustafa-ws). Desinstalar borra el servicio, el binario y su configuración.
+
+| # | Protocolo | Puerto (defecto, configurable) | Instalador |
+| - | --------- | ------------------------------ | ---------- |
 | 1 | BadVPN (udpgw) | 7300 UDP | `install/badvpn.sh` (compila desde ambrop72/badvpn) |
-| 2 | Stunnel4 (SSH+SSL) | 443, o 4443 si Xray ocupa el 443 | `install/stunnel4.sh` |
+| 2 | Stunnel4 (SSH+SSL) | 443, o 4443 si Xray ocupa el 443 | `install/stunnel4.sh` (unidad systemd nativa) |
 | 3 | HCR | 8080 TLS | `install/hcr.sh` (compila desde `install/hcr-src/`) |
 | 4 | BHTTP | 8087 | `install/bhttp.sh` (compila desde `install/bhttp-src/`, solo x86_64) |
 | 5 | CHTTP | 8445 TLS | `install/chttp.sh` (compila desde `install/chttp-src/`) |
-| 6 | V2SOCKS | señal 8444, UDP 3478 | `install/v2socks.sh` (compila desde `install/v2socks-src/`) |
+| 6 | V2SOCKS | señal 8444, UDP 3478 (fijo) | `install/v2socks.sh` (compila desde `install/v2socks-src/`) |
 | 7 | mustafa-ws (SSH/WS) | 444 | `install/mustafa-ws.sh` (compila desde `install/ws-src/`) |
-| 8 | CheckUser | 80 | `install/checkuser.sh` |
-| 9 | Monitor App | panel en `http://IP/monitor.html` | `install/monitor.sh` |
+| 8 | CheckUser | :80 público (vía Nginx) / 8888 loopback | `install/checkuser.sh` |
+| 9 | Monitor App | panel en `http://IP/monitor.html` (sin puerto propio) | `install/monitor.sh` |
 
 La base (sin entrar al menú [03]) ya instala: Xray (VLESS Reality :443,
-VMess WS :10086, VLESS WS :10087), Nginx proxy WS :80 (`/vmess`, `/vless`),
-OpenSSH :22 y mustafa-ws :444 con TOKEN.
+VMess WS :10086, VLESS WS :10087), Nginx proxy WS :80 (`/vmess`, `/vless`,
+`/checkUser`, `/server/online`), OpenSSH :22 y mustafa-ws :444 con TOKEN.
+
+CheckUser escucha en loopback `127.0.0.1:8888` (configurable) y Nginx lo
+publica en el :80 (`/checkUser` y `/server/online`), para que las tarjetas
+Online/Vence de la app funcionen también con datos móviles (Telcel
+intercepta el HTTP plano; por eso no va directo al :80).
 
 La Monitor App vigila los servicios (timer cada 60 s), reinicia los
 caídos, registra eventos en `/var/log/monitor-mustafa.log` y publica el
@@ -81,6 +94,7 @@ estado en `/var/www/html/monitor.html` (lo sirve Nginx en el :80).
 | Archivo | Qué es |
 | ------- | ------ |
 | `install.sh` | Instalador base + validación de KEY |
+| `install/xray.sh` | Instalador standalone de Xray (para [02] → [6] Instalar V2Ray; también `--uninstall`) |
 | `mustafa` | Menú principal (se instala como comando `mustafa`) |
 | `keys.sha256` | Registro de hashes de keys válidas |
 | `install/badvpn.sh`, `install/stunnel4.sh` | Instaladores BadVPN / Stunnel4 |
@@ -102,11 +116,21 @@ lleva binarios.
 
 22 SSH · 80 HTTP/Nginx/CheckUser/Monitor · 443 Xray VLESS Reality
 (o Stunnel4 si Xray no lo ocupa) · 444 mustafa-ws · 7300 BadVPN UDP ·
-8080 HCR · 8087 BHTTP · 8444 V2SOCKS señal · 8445 CHTTP · UDP 3478
-V2SOCKS · UDP 443 Hysteria2 (futuro) · 5667 ZIVPN UDP (futuro).
+8080 HCR · 8087 BHTTP · 8444 V2SOCKS señal · 8445 CHTTP · 8888 CheckUser
+(loopback) · UDP 3478 V2SOCKS · UDP 443 Hysteria2 (futuro) · 5667 ZIVPN
+UDP (futuro).
+
+Todos los puertos de la tabla de protocolos se pueden cambiar desde el
+menú [03] (cada protocolo → [3] Cambiar puerto); V2SOCKS cambia solo el
+puerto de señalización (el UDP 3478 es fijo) y CheckUser cambia el puerto
+de loopback (el público sigue siendo el :80 de Nginx).
 
 ## Estado
 
-Versión **1.0**. Probado en local (sintaxis y render del menú);
-**falta la primera instalación real en un VPS limpio** para verificar
-el arranque de cada servicio y la validación de KEY de punta a punta.
+Versión **1.0**. Primera instalación real completada en un VPS limpio
+(2026-11-19, base Xray + menú funcionando). Los instaladores de
+protocolos (CHTTP, V2SOCKS, HCR, BHTTP, mustafa-ws, Stunnel4, CheckUser,
+Monitor, Xray standalone) se probaron de punta a punta en local:
+instalación con puerto elegido, cambio de puerto, desinstalación y
+verificación de que el servicio escucha en el puerto. Falta probar cada
+protocolo en el VPS real y una conexión de la app de punta a punta.

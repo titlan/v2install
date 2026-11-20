@@ -176,7 +176,7 @@ install -m 755 "$TMPDIR_XRAY/xray" "$XRAY_DIR/xray"
 install -m 644 "$TMPDIR_XRAY/geoip.dat" /usr/local/share/xray/geoip.dat
 install -m 644 "$TMPDIR_XRAY/geosite.dat" /usr/local/share/xray/geosite.dat
 ok "Xray instalado en $XRAY_DIR/xray"
-"$XRAY_DIR/xray" version | head -n 1
+"$XRAY_DIR/xray" version 2>/dev/null | head -n 1 || true  # head puede cerrar el pipe (SIGPIPE); no es error
 
 # --- Claves Reality + UUID del usuario base ----------------------------------
 # 'xray x25519' cambió de formato en las versiones nuevas (v26.x):
@@ -349,6 +349,23 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # checkUser (MUSTAFA) -> 127.0.0.1:8888 (tarjetas Online/Vence de la app)
+    location /checkUser {
+        proxy_pass http://127.0.0.1:8888;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /server/online {
+        proxy_pass http://127.0.0.1:8888;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

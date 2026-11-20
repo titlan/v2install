@@ -30,6 +30,17 @@ log()  { echo "[$(date '+%H:%M:%S')] $*"; }
 ok()   { echo "[$(date '+%H:%M:%S')] [OK] $*"; }
 warn() { echo "[$(date '+%H:%M:%S')] [AVISO] $*" >&2; }
 
+# --- Desinstalar ---------------------------------------------------------------
+if [[ "${1:-}" == "--uninstall" ]]; then
+    log "Desinstalando Monitor App..."
+    systemctl stop monitor-mustafa.timer monitor-mustafa.service 2>/dev/null || true
+    systemctl disable monitor-mustafa.timer monitor-mustafa.service 2>/dev/null || true
+    rm -f "$SERVICE" "$TIMER" "$ENGINE" "$HTML_FILE"
+    systemctl daemon-reload 2>/dev/null || true
+    ok "Monitor App desinstalada (timer, motor y panel eliminados; el log $LOG_FILE se conserva)."
+    exit 0
+fi
+
 # Servicios que vigila el motor, con su puerto informativo.
 # (stunnel4 usa 443 si está libre y 4443 si Xray ya ocupa el 443.)
 SERVICES=(

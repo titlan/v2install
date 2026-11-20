@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # checkUser para MUSTAFA - igual que el de Enigma
-# POST http://<IP-VPS>:80/checkUser  con body {"user": "mexico"}
+# Escucha en loopback (127.0.0.1:8888 por defecto) y Nginx lo publica en
+# el puerto 80 con /checkUser y /server/online. El :80 directo NO se
+# puede usar: en una VPS MUSTAFA Nginx ya ocupa el 80 y el servicio no
+# arrancaría (Address already in use).
+# POST http://<IP-VPS>/checkUser  con body {"user": "mexico"}
 # Responde texto plano:
 #   "not exist"              -> el usuario no existe en /etc/passwd
 #   "01/01/2027"             -> fecha de vencimiento (dd/MM/yyyy) del usuario
@@ -11,7 +15,7 @@
 #   La app Mustafa VPN siempre envia el Android ID del telefono
 #   (Settings.Secure.ANDROID_ID). Si el usuario NO tiene token
 #   registrado, el campo token se ignora y responde como antes.
-# GET http://<IP-VPS>:80/server/online
+# GET http://<IP-VPS>/server/online
 # Responde texto plano con el numero de usuarios online (sesiones SSH
 # activas). Lo lee la app Mustafa VPN (SocksHttpMainActivity.loadServer1)
 # para mostrar "Usuarios Online: N" en el home.
@@ -32,7 +36,8 @@ import sys
 import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-PORT = int(os.environ.get("CHECKUSER_PORT", "80"))
+HOST = os.environ.get("CHECKUSER_HOST", "127.0.0.1")
+PORT = int(os.environ.get("CHECKUSER_PORT", "8888"))
 TOKENS_FILE = os.environ.get("CHECKUSER_TOKENS_FILE", "/etc/checkuser-tokens.json")
 
 def load_tokens():
@@ -175,4 +180,4 @@ if __name__ == "__main__":
             else:
                 print(f"{user} no tenia token registrado")
         sys.exit(0)
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

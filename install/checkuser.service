@@ -5,6 +5,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
+Environment=CHECKUSER_PORT=8888
 ExecStart=/usr/bin/python3 /usr/local/bin/checkuser.py
 Restart=always
 RestartSec=3

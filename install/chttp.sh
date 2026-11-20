@@ -36,16 +36,54 @@ info() { echo "[chttp] $*"; }
 
 [[ "$(id -u)" -eq 0 ]] || fail "Ejecuta como root (sudo bash chttp.sh)."
 
+# --- Puerto --------------------------------------------------------------------
+# CHTTP_PORT lo fija quien llama (el menú). Sin él se mantiene el puerto
+# actual (si ya está instalado) o 8445.
+PORT_REQ="${CHTTP_PORT:-}"
+port_actual() {
+    local p=""
+    [[ -f /etc/mustafa/ports/chttp ]] && p="$(cat /etc/mustafa/ports/chttp 2>/dev/null || true)"
+    if [[ -z "$p" ]]; then
+        p="$(grep -o -- '--addr :[0-9]*' /etc/systemd/system/chttp.service 2>/dev/null | grep -o '[0-9]*$' || true)"
+    fi
+    [[ -z "$p" ]] && p="8445"
+    printf '%s' "$p"
+}
+if [[ -n "$PORT_REQ" ]]; then
+    case "$PORT_REQ" in ""|*[!0-9]*) fail "CHTTP_PORT debe ser un número entre 1 y 65535." ;; esac
+    PORT="$((10#$PORT_REQ))"
+    [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || fail "CHTTP_PORT debe ser entre 1 y 65535."
+else
+    PORT="$(port_actual)"
+fi
+ADDR=":$PORT"
+
+# --- Desinstalar ---------------------------------------------------------------
+if [[ "${1:-}" == "--uninstall" ]]; then
+    echo "[chttp] Desinstalando CHTTP..."
+    systemctl stop "$SERVICE" 2>/dev/null || true
+    systemctl disable "$SERVICE" 2>/dev/null || true
+    rm -f "/etc/systemd/system/$SERVICE.service" "$BIN"
+    rm -rf "$CONF_DIR" /etc/mustafa/ports/chttp
+    systemctl daemon-reload 2>/dev/null || true
+    echo "[chttp] CHTTP desinstalado (servicio, binario y /etc/chttp eliminados)."
+    exit 0
+fi
+
 # --- Idempotencia: si ya está instalado y activo, no se toca nada -----------
 if [[ -x "$BIN" ]] && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
-    info "CHTTP ya está instalado y activo."
-    info "  Escucha : $ADDR (TLS) -> SSH $SSH_ADDR"
-    if [[ -f "$CONF_DIR/password" ]]; then
-        IP="$(curl -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
-        info "  Enlace: chttp://$(cat "$CONF_DIR/password")@${IP:-<IP>}:${ADDR##*:}?insecure=1"
+    # Si se pidió otro puerto, no salir: reconfigurar y reiniciar abajo.
+    if [[ -z "$PORT_REQ" || "$(port_actual)" == "$PORT_REQ" ]]; then
+        info "CHTTP ya está instalado y activo."
+        info "  Escucha : $ADDR (TLS) -> SSH $SSH_ADDR"
+        if [[ -f "$CONF_DIR/password" ]]; then
+            IP="$(curl -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
+            info "  Enlace: chttp://$(cat "$CONF_DIR/password")@${IP:-<IP>}:${ADDR##*:}?insecure=1"
+        fi
+        systemctl --no-pager status "$SERVICE" --lines=5 || true
+        exit 0
     fi
-    systemctl --no-pager status "$SERVICE" --lines=5 || true
-    exit 0
+    info "Cambiando puerto CHTTP de $(port_actual) a $PORT_REQ ..."
 fi
 
 # --- Go ----------------------------------------------------------------------
@@ -59,9 +97,13 @@ go_version_ok() {
 }
 
 obtener_go() {
+    # Deja el binario "go" a usar en la variable global GO_BIN.
+    # NO se captura con $(...) : la captura corre en un subshell, donde
+    # (a) los mensajes info irían mezclados en GO_BIN y (b) el trap EXIT
+    # borraría el Go descargado antes de compilar. Los mensajes van a stderr.
     if command -v go >/dev/null 2>&1 && go_version_ok "$(command -v go)" 1 23; then
-        info "Usando Go del sistema: $(go version)"
-        command -v go
+        info "Usando Go del sistema: $(go version)" >&2
+        GO_BIN="$(command -v go)"
         return
     fi
     command -v curl >/dev/null 2>&1 || fail "Para descargar Go se necesita curl."
@@ -73,7 +115,7 @@ obtener_go() {
     esac
     tgz="$GO_VERSION.linux-$arch.tar.gz"
     GO_TMPDIR="$(mktemp -d /tmp/chttp-go.XXXXXX)"
-    info "Descargando Go $GO_VERSION ($arch) de go.dev ..."
+    info "Descargando Go $GO_VERSION ($arch) de go.dev ..." >&2
     curl -fsSL -o "$GO_TMPDIR/$tgz" "https://go.dev/dl/$tgz" ||
         { rm -rf "$GO_TMPDIR"; fail "No se pudo descargar Go."; }
     local got
@@ -84,12 +126,15 @@ obtener_go() {
     local gobin="$GO_TMPDIR/go/bin/go"
     [ -x "$gobin" ] || { rm -rf "$GO_TMPDIR"; fail "El toolchain descargado no trae el binario go."; }
     go_version_ok "$gobin" 1 23 || { rm -rf "$GO_TMPDIR"; fail "El Go descargado no es >= 1.23."; }
-    info "Go $GO_VERSION listo: $($gobin version)"
-    echo "$gobin"
+    info "Go $GO_VERSION listo: $($gobin version)" >&2
+    GO_BIN="$gobin"
 }
 
 limpiar_go_tmp() {
     [ -n "$GO_TMPDIR" ] && [ -d "$GO_TMPDIR" ] && rm -rf "$GO_TMPDIR"
+    # Siempre 0: con set -e, si esta función (trap EXIT) devuelve 1
+    # el script terminaría con exit 1 aunque todo haya ido bien.
+    return 0
 }
 trap limpiar_go_tmp EXIT
 
@@ -98,7 +143,8 @@ if [[ ! -x "$BIN" ]]; then
     for f in "$SRC_DIR/go.mod" "$SRC_DIR/main.go"; do
         [ -f "$f" ] || fail "Falta el código fuente: $f (el directorio chttp-src debe estar junto a chttp.sh)."
     done
-    GO_BIN="$(obtener_go)" || exit 1
+    GO_BIN=""
+    obtener_go || exit 1
     info "Compilando chttp-server desde $SRC_DIR ..."
     (cd "$SRC_DIR" && GOTOOLCHAIN=local GOPROXY=off CGO_ENABLED=0 \
         "$GO_BIN" build -trimpath -ldflags "-s -w" \
@@ -120,7 +166,9 @@ elif [[ -f "$CONF_DIR/password" ]]; then
     PASSWORD="$(cat "$CONF_DIR/password")"
     info "Reutilizando contraseña existente en $CONF_DIR/password"
 else
-    PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)"
+    # (|| true: con pipefail, tr muere por SIGPIPE cuando head ya leyó
+    # 24 caracteres y eso mataría el script con exit 141.)
+    PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)"
 fi
 printf '%s' "$PASSWORD" > "$CONF_DIR/password"
 chmod 600 "$CONF_DIR/password"
@@ -154,10 +202,17 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now "$SERVICE"
+# enable --now solo no reinicia un servicio que ya corre: un cambio
+# de puerto exige reiniciar para que tome la nueva config.
+systemctl enable "$SERVICE"
+systemctl restart "$SERVICE" || true
 sleep 1
 systemctl is-active --quiet "$SERVICE" ||
     fail "El servicio no quedó activo. Revisa con: journalctl -u $SERVICE -n 50"
+ss -tln 2>/dev/null | grep -q ":$PORT " ||
+    fail "El servicio está activo pero no escucha en el puerto $PORT. Revisa: journalctl -u $SERVICE -n 50"
+mkdir -p /etc/mustafa/ports
+echo "$PORT" > /etc/mustafa/ports/chttp
 
 IP="$(curl -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
 echo

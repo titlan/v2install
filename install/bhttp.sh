@@ -121,18 +121,21 @@ go_version_ok() {
   [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 21 ]; }
 }
 
-# Devuelve por stdout la ruta del binario "go" a usar.
+# Deja el binario "go" a usar en la variable global GO_BIN.
+# NO se captura con $(...) : la captura corre en un subshell, donde el
+# trap EXIT borraría el Go descargado antes de compilar (y GO_TMPDIR no
+# sobreviviría al subshell). Los mensajes ya van a stderr (ver info).
 obtener_go() {
   if [ -n "$GO_ARG" ]; then
     [ -x "$GO_ARG" ] || fail "No existe o no es ejecutable: $GO_ARG"
     go_version_ok "$GO_ARG" || fail "El go de $GO_ARG es menor que 1.21."
     info "Usando Go de $GO_ARG: $("$GO_ARG" version)"
-    echo "$GO_ARG"
+    GO_BIN="$GO_ARG"
     return
   fi
   if command -v go >/dev/null 2>&1 && go_version_ok "$(command -v go)"; then
     info "Usando Go del sistema: $(go version)"
-    command -v go
+    GO_BIN="$(command -v go)"
     return
   fi
   command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 ||
@@ -153,11 +156,14 @@ obtener_go() {
   [ -x "$gobin" ] || { rm -rf "$GO_TMPDIR"; fail "El toolchain descargado no trae el binario go."; }
   go_version_ok "$gobin" || { rm -rf "$GO_TMPDIR"; fail "El Go descargado no es >= 1.21."; }
   info "Go $GO_VERSION listo: $($gobin version)"
-  echo "$gobin"
+  GO_BIN="$gobin"
 }
 
 limpiar_go_tmp() {
   [ -n "$GO_TMPDIR" ] && [ -d "$GO_TMPDIR" ] && rm -rf "$GO_TMPDIR"
+  # Siempre 0: con set -e, si esta función (trap EXIT) devuelve 1
+  # el script terminaría con exit 1 aunque todo haya ido bien.
+  return 0
 }
 
 # --- compilacion -----------------------------------------------------------
@@ -236,11 +242,11 @@ do_install() {
   if ss -tlnp 2>/dev/null | grep -q ":$PORT " && ! systemctl is-active --quiet "$SERVICE_NAME.service"; then
     fail "El puerto $PORT ya esta ocupado por otro servicio."
   fi
-  local go
-  # obtener_go corre en un subshell por $(...): si falla, su exit 1
-  # solo mata el subshell, por eso hay que abortar aqui explicitamente.
-  go="$(obtener_go)" || exit 1
-  compilar "$go"
+  # obtener_go deja el binario en la global GO_BIN (sin subshell: con
+  # $(...) el trap EXIT borraría el Go descargado antes de compilar).
+  GO_BIN=""
+  obtener_go || exit 1
+  compilar "$GO_BIN"
   limpiar_go_tmp
   render_unit
   [ -L "$SYSTEMD_DIR/$SERVICE_NAME.service" ] ||

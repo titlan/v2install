@@ -50,11 +50,49 @@ case "$ARCH" in
 esac
 log "BadVPN (udpgw) — arquitectura: $ARCH_LABEL"
 
+# --- Puerto --------------------------------------------------------------------
+# BADVPN_PORT lo fija quien llama (el menú). Sin él se mantiene el puerto
+# actual (si ya está instalado) o 7300.
+PORT_REQ="${BADVPN_PORT:-}"
+port_actual() {
+    local p=""
+    [[ -f /etc/mustafa/ports/badvpn ]] && p="$(cat /etc/mustafa/ports/badvpn 2>/dev/null || true)"
+    if [[ -z "$p" ]]; then
+        p="$(grep -o -- '--listen-addr 127.0.0.1:[0-9]*' /etc/systemd/system/badvpn.service 2>/dev/null | grep -o '[0-9]*$' || true)"
+    fi
+    [[ -z "$p" ]] && p="7300"
+    printf '%s' "$p"
+}
+if [[ -n "$PORT_REQ" ]]; then
+    case "$PORT_REQ" in ""|*[!0-9]*) die "BADVPN_PORT debe ser un número entre 1 y 65535." ;; esac
+    PORT="$((10#$PORT_REQ))"
+    [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "BADVPN_PORT debe ser entre 1 y 65535."
+else
+    PORT="$(port_actual)"
+fi
+LISTEN_ADDR="127.0.0.1:$PORT"
+
+# --- Desinstalar ---------------------------------------------------------------
+if [[ "${1:-}" == "--uninstall" ]]; then
+    log "Desinstalando BadVPN..."
+    systemctl stop badvpn 2>/dev/null || true
+    systemctl disable badvpn 2>/dev/null || true
+    rm -f /etc/systemd/system/badvpn.service "$BADVPN_BIN"
+    rm -rf /etc/mustafa/ports/badvpn
+    systemctl daemon-reload 2>/dev/null || true
+    ok "BadVPN desinstalado (servicio y binario eliminados)."
+    exit 0
+fi
+
 # --- Idempotencia: ya instalado y activo --------------------------------------
 if [[ -x "$BADVPN_BIN" ]] && systemctl is-active --quiet badvpn 2>/dev/null; then
-    ok "BadVPN ya está instalado y activo (udpgw en $LISTEN_ADDR)."
-    ss -ulnp 2>/dev/null | grep -E ':7300' || true
-    exit 0
+    # Si se pidió otro puerto, no salir: reconfigurar y reiniciar abajo.
+    if [[ -z "$PORT_REQ" || "$(port_actual)" == "$PORT_REQ" ]]; then
+        ok "BadVPN ya está instalado y activo (udpgw en $LISTEN_ADDR)."
+        ss -ulnp 2>/dev/null | grep -E ":$PORT" || true
+        exit 0
+    fi
+    log "Cambiando puerto BadVPN de $(port_actual) a $PORT_REQ ..."
 fi
 
 # --- Dependencias de compilación ---------------------------------------------
@@ -87,7 +125,7 @@ fi
 
 # --- Servicio systemd ----------------------------------------------------------
 log "Creando servicio systemd badvpn.service ($LISTEN_ADDR)..."
-cat > /etc/systemd/system/badvpn.service <<'EOF'
+cat > /etc/systemd/system/badvpn.service <<EOF
 [Unit]
 Description=BadVPN UDP Gateway (udpgw)
 After=network.target
@@ -95,7 +133,7 @@ After=network.target
 [Service]
 Type=simple
 User=nobody
-ExecStart=/usr/local/bin/badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 1000
+ExecStart=/usr/local/bin/badvpn-udpgw --listen-addr $LISTEN_ADDR --max-clients 1000
 Restart=on-failure
 RestartSec=5
 
@@ -104,16 +142,23 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now badvpn
+# enable --now solo no reinicia un servicio que ya corre: un cambio
+# de puerto exige reiniciar para que tome la nueva config.
+systemctl enable badvpn
+systemctl restart badvpn || true
 
 # --- Estado final ---------------------------------------------------------------
 systemctl is-active --quiet badvpn || die "El servicio badvpn no quedó activo. Revisa: journalctl -u badvpn -n 50"
+ss -uln 2>/dev/null | grep -q ":$PORT " ||
+    die "El servicio está activo pero no escucha en el puerto UDP $PORT. Revisa: journalctl -u badvpn -n 50"
+mkdir -p /etc/mustafa/ports
+echo "$PORT" > /etc/mustafa/ports/badvpn
 ok "BadVPN activo."
 echo
 echo "  BadVPN (udpgw) : $LISTEN_ADDR"
 echo "  Binario        : $BADVPN_BIN"
 echo "  Servicio       : badvpn.service"
-ss -ulnp 2>/dev/null | grep -E ':7300' || true
+ss -ulnp 2>/dev/null | grep -E ":$PORT" || true
 echo
-echo "  Las apps (HTTP Custom / HTTP Injector) usan 127.0.0.1:7300 como"
+echo "  Las apps (HTTP Custom / HTTP Injector) usan $LISTEN_ADDR como"
 echo "  pasarela UDP dentro del túnel SSH."

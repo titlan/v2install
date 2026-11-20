@@ -626,6 +626,50 @@ v2ray_status() {
     fi
 }
 
+v2ray_install() {
+    if [[ -x "$XRAY_BIN" ]] && systemctl is-active --quiet xray 2>/dev/null; then
+        echo "  Xray ya está instalado y activo."
+        return
+    fi
+    if [[ ! -f "$INSTALL_DIR/xray.sh" ]]; then
+        echo "  El instalador $INSTALL_DIR/xray.sh no está en este VPS."
+        echo "  Descargándolo del repo..."
+        if curl -fsSL -o "$INSTALL_DIR/xray.sh" "https://raw.githubusercontent.com/titlan/v2install/main/install/xray.sh"; then
+            chmod +x "$INSTALL_DIR/xray.sh"
+        else
+            echo "  No se pudo descargar xray.sh."
+            echo "  Cópialo a mano: de v2install/install/xray.sh a /etc/mustafa/install/xray.sh"
+            return
+        fi
+    fi
+    echo
+    echo "  Instalando Xray (V2Ray)..."
+    echo
+    bash "$INSTALL_DIR/xray.sh" || echo "  (el instalador terminó con error — revisa la salida)"
+}
+
+v2ray_uninstall() {
+    if [[ ! -f "$XRAY_CONF" && ! -x "$XRAY_BIN" ]]; then
+        echo "  Xray no está instalado."
+        return
+    fi
+    echo "  Esto borra Xray, su config y TODAS las cuentas UUID."
+    read -rp "  ¿Desinstalar Xray? [s/N]: " c || return
+    [[ "$c" == "s" || "$c" == "S" ]] || { echo "  Cancelado."; return; }
+    if [[ -f "$INSTALL_DIR/xray.sh" ]]; then
+        bash "$INSTALL_DIR/xray.sh" --uninstall || echo "  (la desinstalación terminó con error — revisa la salida)"
+    else
+        echo "  No está $INSTALL_DIR/xray.sh; borrando a mano..."
+        systemctl stop xray 2>/dev/null || true
+        systemctl disable xray 2>/dev/null || true
+        rm -f /etc/systemd/system/xray.service
+        rm -rf /usr/local/bin/xray /usr/local/etc/xray /usr/local/share/xray /var/log/xray
+        sed -i '/^xray_tag=/d; /^xray_uuid=/d; /^reality_public=/d; /^reality_shortid=/d' /etc/mustafa/info 2>/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
+        echo "  Xray desinstalado."
+    fi
+}
+
 v2ray_menu() {
     local opt st
     while true; do
@@ -643,6 +687,8 @@ v2ray_menu() {
         printf '  [3] Eliminar usuario UUID\n'
         printf '  [4] Reiniciar Xray\n'
         printf '  [5] Estado de Xray\n'
+        printf '  [6] Instalar V2Ray\n'
+        printf '  [7] Desinstalar V2Ray\n'
         printf '  [0] Volver\n'
         echo
         read -rp "  Seleccione una opción: " opt || return 0
@@ -652,6 +698,8 @@ v2ray_menu() {
             3) v2ray_del; pause ;;
             4) v2ray_restart; pause ;;
             5) v2ray_status; pause ;;
+            6) v2ray_install; pause ;;
+            7) v2ray_uninstall; pause ;;
             0) return 0 ;;
             *) echo "  Opción no válida: $opt"; sleep 1 ;;
         esac
@@ -684,18 +732,139 @@ unit_state() {
     printf '%b[--]%b' "$C_GREEN" "$C_RESET"
 }
 
-run_installer() {
-    local file=$1 label=$2
-    if [[ -f "$INSTALL_DIR/$file" ]]; then
-        echo
-        echo "  Instalando $label..."
-        echo
-        bash "$INSTALL_DIR/$file" || echo "  (el instalador terminó con error — revisa la salida)"
-    else
-        echo
-        echo "  No está el instalador $INSTALL_DIR/$file."
-        echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+# Puerto actual de un protocolo: archivo de estado, o su servicio/config,
+# o el puerto por defecto. Para Stunnel4, si no hay nada instalado, se
+# replica la autodetección del instalador (443 libre / 4443 si Xray lo ocupa).
+proto_port() {
+    local key=$1 def=$2 p=""
+    [[ -f "/etc/mustafa/ports/$key" ]] && p="$(cat "/etc/mustafa/ports/$key" 2>/dev/null || true)"
+    if [[ -z "$p" ]]; then
+        case "$key" in
+            badvpn)     p="$(grep -o -- '--listen-addr 127.0.0.1:[0-9]*' /etc/systemd/system/badvpn.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            stunnel4)   p="$(awk -F'=' '/^accept[[:space:]]*=/{gsub(/ /,"",$2); print $2; exit}' /etc/stunnel/stunnel.conf 2>/dev/null || true)"
+                        if [[ -z "$p" ]]; then
+                            if ss -tln 2>/dev/null | awk '$4 ~ /:443$/ {found=1} END {exit !found}'; then p="4443"; else p="443"; fi
+                        fi ;;
+            hcr)        p="$(grep -o -- '-listen :[0-9]*' /etc/systemd/system/hcr-server.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            bhttp)      p="$(grep -o -- '-listen 0.0.0.0:[0-9]*' /etc/systemd/system/bhttp-server.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            chttp)      p="$(grep -o -- '--addr :[0-9]*' /etc/systemd/system/chttp.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            v2socks)    p="$(grep -o -- '--signal-addr :[0-9]*' /etc/systemd/system/v2socks.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+            mustafa-ws) p="$(grep '^LISTEN=' /etc/mustafa-ws/config 2>/dev/null | cut -d: -f2- || true)" ;;
+            checkuser)  p="$(grep -o -- '^Environment=CHECKUSER_PORT=[0-9]*' /etc/systemd/system/checkuser.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
+        esac
     fi
+    [[ -z "$p" ]] && p="$def"
+    printf '%s' "$p"
+}
+
+# Instala un protocolo en el puerto dado (el instalador escribe el puerto
+# en /etc/mustafa/ports/<clave>; BHTTP lo escribe el menú porque su
+# instalador ya trae sus propias opciones --install/--port).
+proto_do_install() {
+    local key=$1 script=$2 envvar=$3 port=$4
+    if [[ ! -f "$INSTALL_DIR/$script" ]]; then
+        echo
+        echo "  No está el instalador $INSTALL_DIR/$script."
+        echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+        return
+    fi
+    echo
+    if [[ -n "$port" ]]; then
+        echo "  Instalando $key en el puerto $port..."
+    else
+        echo "  Instalando $key..."
+    fi
+    echo
+    if [[ "$key" == "bhttp" ]]; then
+        if bash "$INSTALL_DIR/$script" --install --port "$port"; then
+            mkdir -p /etc/mustafa/ports
+            echo "$port" > "/etc/mustafa/ports/$key"
+        else
+            echo "  (el instalador terminó con error — revisa la salida)"
+        fi
+    elif [[ -z "$envvar" ]]; then
+        bash "$INSTALL_DIR/$script" || echo "  (el instalador terminó con error — revisa la salida)"
+    else
+        env "$envvar=$port" bash "$INSTALL_DIR/$script" || echo "  (el instalador terminó con error — revisa la salida)"
+    fi
+}
+
+proto_do_uninstall() {
+    local key=$1 script=$2
+    if [[ ! -f "$INSTALL_DIR/$script" ]]; then
+        echo
+        echo "  No está el instalador $INSTALL_DIR/$script."
+        echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+        return
+    fi
+    echo
+    echo "  Desinstalando $key..."
+    echo
+    bash "$INSTALL_DIR/$script" --uninstall || echo "  (la desinstalación terminó con error — revisa la salida)"
+    rm -f "/etc/mustafa/ports/$key"
+}
+
+# Submenú de un protocolo: instalar / desinstalar / cambiar puerto.
+proto_menu() {
+    local key=$1 name="" script="" unit="" def="" envvar="" has_port=1
+    case "$key" in
+        badvpn)     name="BadVPN";     script="badvpn.sh";     unit="badvpn";            def="7300"; envvar="BADVPN_PORT" ;;
+        stunnel4)   name="Stunnel4";   script="stunnel4.sh";   unit="stunnel4";          def="443";  envvar="STUNNEL_PORT" ;;
+        hcr)        name="HCR";        script="hcr.sh";        unit="hcr-server";        def="8080"; envvar="HCR_PORT" ;;
+        bhttp)      name="BHTTP";      script="bhttp.sh";      unit="bhttp-server";      def="8087"; envvar="BHTTP_PORT" ;;
+        chttp)      name="CHTTP";      script="chttp.sh";      unit="chttp";             def="8445"; envvar="CHTTP_PORT" ;;
+        v2socks)    name="V2SOCKS";    script="v2socks.sh";    unit="v2socks";           def="8444"; envvar="V2SOCKS_PORT" ;;
+        mustafa-ws) name="mustafa-ws"; script="mustafa-ws.sh"; unit="mustafa-ws";        def="444";  envvar="WS_PORT" ;;
+        checkuser)  name="CheckUser";  script="checkuser.sh";  unit="checkuser";         def="8888"; envvar="CHECKUSER_PORT" ;;
+        monitor)    name="Monitor App"; script="monitor.sh";   unit="monitor-mustafa.timer"; def=""; envvar=""; has_port=0 ;;
+        *) echo "  Protocolo desconocido: $key"; return ;;
+    esac
+    local opt port cur ans
+    while true; do
+        clear
+        cur="$(proto_port "$key" "$def")"
+        printf '%b\n  ============ %s ============\n%b' "$C_CYAN_B" "$name" "$C_RESET"
+        echo
+        printf '  Estado : %s\n' "$(unit_state "$unit")"
+        [[ "$has_port" == 1 ]] && printf '  Puerto : %s\n' "$cur"
+        echo
+        printf '  [1] Instalar %s\n' "$name"
+        printf '  [2] Desinstalar %s\n' "$name"
+        [[ "$has_port" == 1 ]] && printf '  [3] Cambiar puerto (actual: %s)\n' "$cur"
+        printf '  [0] Volver\n'
+        echo
+        read -rp "  Seleccione una opción: " opt || return 0
+        case "$opt" in
+            1)
+                port="$cur"
+                if [[ "$has_port" == 1 ]]; then
+                    read -rp "  Puerto para $name [$cur]: " port || return 0
+                    [[ -z "$port" ]] && port="$cur"
+                    case "$port" in ""|*[!0-9]*) echo "  Puerto no válido."; sleep 1; continue ;; esac
+                    port="$((10#$port))"
+                    if [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then echo "  Puerto no válido (1-65535)."; sleep 1; continue; fi
+                fi
+                proto_do_install "$key" "$script" "$envvar" "$port"
+                pause ;;
+            2)
+                read -rp "  ¿Desinstalar $name? Se borra el servicio y su configuración [s/N]: " ans || return 0
+                [[ "$ans" == "s" || "$ans" == "S" ]] || continue
+                proto_do_uninstall "$key" "$script"
+                pause ;;
+            3)
+                [[ "$has_port" == 1 ]] || { echo "  $name no tiene puerto."; sleep 1; continue; }
+                read -rp "  Nuevo puerto para $name (actual: $cur): " port || return 0
+                [[ -z "$port" ]] && { echo "  Sin cambio."; sleep 1; continue; }
+                case "$port" in ""|*[!0-9]*) echo "  Puerto no válido."; sleep 1; continue ;; esac
+                port="$((10#$port))"
+                if [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then echo "  Puerto no válido (1-65535)."; sleep 1; continue; fi
+                if [[ "$port" == "$cur" ]]; then echo "  Ya está en ese puerto."; sleep 1; continue; fi
+                proto_do_install "$key" "$script" "$envvar" "$port"
+                pause ;;
+            0) return 0 ;;
+            *) echo "  Opción no válida: $opt"; sleep 1 ;;
+        esac
+    done
 }
 
 protocols_menu() {
@@ -704,30 +873,30 @@ protocols_menu() {
         clear
         printf '%b\n  ============ INSTALAR PROTOCOLOS ============\n%b' "$C_CYAN_B" "$C_RESET"
         echo
-        printf '  [1] BadVPN        (UDP :7300)        %s\n' "$(unit_state badvpn)"
-        printf '  [2] Stunnel4      (SSL :443/4443)    %s\n' "$(unit_state stunnel4)"
-        printf '  [3] HCR           (TLS :8080)        %s\n' "$(unit_state hcr-server)"
-        printf '  [4] BHTTP         (:8087)            %s\n' "$(unit_state bhttp-server)"
-        printf '  [5] CHTTP         (TLS :8445)        %s\n' "$(unit_state chttp)"
-        printf '  [6] V2SOCKS       (señal :8444)      %s\n' "$(unit_state v2socks)"
-        printf '  [7] mustafa-ws    (WS :444)          %s\n' "$(unit_state mustafa-ws)"
-        printf '  [8] CheckUser     (:80)              %s\n' "$(unit_state checkuser)"
-        printf '  [9] Monitor App   (panel :80)        %s\n' "$(unit_state monitor-mustafa.timer)"
+        printf '  [1] BadVPN        (UDP :%-5s)      %s\n' "$(proto_port badvpn 7300)" "$(unit_state badvpn)"
+        printf '  [2] Stunnel4      (SSL :%-5s)      %s\n' "$(proto_port stunnel4 443)" "$(unit_state stunnel4)"
+        printf '  [3] HCR           (TLS :%-5s)      %s\n' "$(proto_port hcr 8080)" "$(unit_state hcr-server)"
+        printf '  [4] BHTTP         (:%-5s)          %s\n' "$(proto_port bhttp 8087)" "$(unit_state bhttp-server)"
+        printf '  [5] CHTTP         (TLS :%-5s)      %s\n' "$(proto_port chttp 8445)" "$(unit_state chttp)"
+        printf '  [6] V2SOCKS       (señal :%-5s)    %s\n' "$(proto_port v2socks 8444)" "$(unit_state v2socks)"
+        printf '  [7] mustafa-ws    (WS :%-5s)       %s\n' "$(proto_port mustafa-ws 444)" "$(unit_state mustafa-ws)"
+        printf '  [8] CheckUser     (:%-5s)          %s\n' "$(proto_port checkuser 8888)" "$(unit_state checkuser)"
+        printf '  [9] Monitor App   (panel :80)      %s\n' "$(unit_state monitor-mustafa.timer)"
         printf '  [0] Volver\n'
         token="$(ws_conf TOKEN)"
         [[ -n "$token" ]] && printf '\n  TOKEN WS (mustafa-ws): %s\n' "$token"
         echo
         read -rp "  Seleccione una opción: " opt || return 0
         case "$opt" in
-            1) run_installer "badvpn.sh" "BadVPN"; pause ;;
-            2) run_installer "stunnel4.sh" "Stunnel4"; pause ;;
-            3) run_installer "hcr.sh" "HCR"; pause ;;
-            4) run_installer "bhttp.sh" "BHTTP"; pause ;;
-            5) run_installer "chttp.sh" "CHTTP"; pause ;;
-            6) run_installer "v2socks.sh" "V2SOCKS"; pause ;;
-            7) run_installer "mustafa-ws.sh" "mustafa-ws"; pause ;;
-            8) run_installer "checkuser.sh" "CheckUser"; pause ;;
-            9) run_installer "monitor.sh" "Monitor App"; pause ;;
+            1) proto_menu badvpn ;;
+            2) proto_menu stunnel4 ;;
+            3) proto_menu hcr ;;
+            4) proto_menu bhttp ;;
+            5) proto_menu chttp ;;
+            6) proto_menu v2socks ;;
+            7) proto_menu mustafa-ws ;;
+            8) proto_menu checkuser ;;
+            9) proto_menu monitor ;;
             0) return 0 ;;
             *) echo "  Opción no válida: $opt"; sleep 1 ;;
         esac
