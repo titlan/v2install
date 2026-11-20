@@ -574,7 +574,6 @@ PROTOCOLS = [
     ("badvpn", "BadVPN", "badvpn.sh", "badvpn", 7300, "BADVPN_PORT", True),
     ("stunnel4", "Stunnel4", "stunnel4.sh", "stunnel4", 443, "STUNNEL_PORT", True),
     ("hcr", "HCR", "hcr.sh", "hcr-server", 8080, "HCR_PORT", True),
-    ("bhttp", "BHTTP", "bhttp.sh", "bhttp-server", 8087, "BHTTP_PORT", True),
     ("chttp", "CHTTP", "chttp.sh", "chttp", 8445, "CHTTP_PORT", True),
     ("v2socks", "V2SOCKS", "v2socks.sh", "v2socks", 8444, "V2SOCKS_PORT", True),
     ("mustafa-ws", "mustafa-ws", "mustafa-ws.sh", "mustafa-ws", 444, "WS_PORT", True),
@@ -593,8 +592,6 @@ PROTO_PORT_PATTERNS = {
                r"--listen-addr 127\.0\.0\.1:(\d+)"),
     "stunnel4": ("/etc/stunnel/stunnel.conf", r"^accept\s*=\s*(\d+)"),
     "hcr": ("/etc/systemd/system/hcr-server.service", r"-listen :(\d+)"),
-    "bhttp": ("/etc/systemd/system/bhttp-server.service",
-              r"-listen 0\.0\.0\.0:(\d+)"),
     "chttp": ("/etc/systemd/system/chttp.service", r"--addr :(\d+)"),
     "v2socks": ("/etc/systemd/system/v2socks.service",
                 r"--signal-addr :(\d+)"),
@@ -662,7 +659,7 @@ BACKUP_PATHS = [
     "/etc/mustafa", "/etc/passwd", "/etc/shadow", "/etc/group",
     "/etc/gshadow", "/etc/ssh/sshd_config", "/usr/local/etc/xray",
     "/etc/nginx/sites-available/mustafa", "/etc/nginx/sites-enabled/mustafa",
-    "/etc/hysteria2", "/etc/chttp", "/etc/v2socks", "/etc/hcr", "/etc/bhttp",
+    "/etc/hysteria2", "/etc/chttp", "/etc/v2socks", "/etc/hcr",
     "/etc/mustafa-ws", "/etc/stunnel", "/etc/fail2ban/jail.local",
     "/etc/sysctl.d/99-mustafa-bbr.conf", "/opt/knightbot/session",
 ]
@@ -1011,21 +1008,11 @@ def api_protocols_install():
             return err("Puerto no válido (1-65535).")
     env_extra = None
     args = []
-    if key == "bhttp" and has_port:
-        # BHTTP trae sus propias opciones --install/--port (como el menú).
-        args = ["--install", "--port", str(port)]
-    elif has_port and envvar:
+    if has_port and envvar:
         env_extra = {envvar: str(port)}
     rc, output = run_installer(script, args=args, env_extra=env_extra)
     if rc is None:
         return err(output, 404)
-    if key == "bhttp" and has_port and rc == 0:
-        try:
-            os.makedirs(os.path.join(STATE_DIR, "ports"), exist_ok=True)
-            with open(os.path.join(STATE_DIR, "ports", key), "w") as f:
-                f.write(str(port))
-        except OSError:
-            pass
     return jsonify({"ok": rc == 0, "output": output})
 
 

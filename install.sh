@@ -7,7 +7,7 @@
 #  Menú (comando `mustafa`):
 #    [01] MENU SSH             — administrar usuarios SSH
 #    [02] MENU V2RAY           — cuentas UUID de Xray + enlaces
-#    [03] INSTALAR PROTOCOLOS  — BadVPN, Stunnel4, HCR, BHTTP, CHTTP,
+#    [03] INSTALAR PROTOCOLOS  — BadVPN, Stunnel4, HCR, CHTTP,
 #                                V2SOCKS, mustafa-ws, CheckUser, Monitor App
 #    [04] GENERADOR DE KEY     — generar/revocar keys de instalación
 #

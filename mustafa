@@ -7,7 +7,7 @@
 #  Estructura (tal cual la pidió David):
 #    [01] MENU SSH             — administrar usuarios SSH (estilo La Casita)
 #    [02] MENU V2RAY           — cuentas UUID de Xray + enlaces
-#    [03] INSTALAR PROTOCOLOS  — BadVPN, Stunnel4, HCR, BHTTP, CHTTP,
+#    [03] INSTALAR PROTOCOLOS  — BadVPN, Stunnel4, HCR, CHTTP,
 #                                V2SOCKS, mustafa-ws, CheckUser, Monitor App,
 #                                Hysteria2, WSPLUS, DOH
 #    [04] GENERADOR DE KEY     — generar/revocar keys de instalación
@@ -1097,7 +1097,6 @@ proto_port() {
                             if ss -tln 2>/dev/null | awk '$4 ~ /:443$/ {found=1} END {exit !found}'; then p="4443"; else p="443"; fi
                         fi ;;
             hcr)        p="$(grep -o -- '-listen :[0-9]*' /etc/systemd/system/hcr-server.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
-            bhttp)      p="$(grep -o -- '-listen 0.0.0.0:[0-9]*' /etc/systemd/system/bhttp-server.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
             chttp)      p="$(grep -o -- '--addr :[0-9]*' /etc/systemd/system/chttp.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
             v2socks)    p="$(grep -o -- '--signal-addr :[0-9]*' /etc/systemd/system/v2socks.service 2>/dev/null | grep -o '[0-9]*$' || true)" ;;
             mustafa-ws) p="$(grep '^LISTEN=' /etc/mustafa-ws/config 2>/dev/null | cut -d: -f2- || true)" ;;
@@ -1112,8 +1111,7 @@ proto_port() {
 }
 
 # Instala un protocolo en el puerto dado (el instalador escribe el puerto
-# en /etc/mustafa/ports/<clave>; BHTTP lo escribe el menú porque su
-# instalador ya trae sus propias opciones --install/--port).
+# en /etc/mustafa/ports/<clave>).
 proto_do_install() {
     local key=$1 script=$2 envvar=$3 port=$4
     if [[ ! -f "$INSTALL_DIR/$script" ]]; then
@@ -1129,14 +1127,7 @@ proto_do_install() {
         echo "  Instalando $key..."
     fi
     echo
-    if [[ "$key" == "bhttp" ]]; then
-        if bash "$INSTALL_DIR/$script" --install --port "$port"; then
-            mkdir -p /etc/mustafa/ports
-            echo "$port" > "/etc/mustafa/ports/$key"
-        else
-            echo "  (el instalador terminó con error — revisa la salida)"
-        fi
-    elif [[ -z "$envvar" ]]; then
+    if [[ -z "$envvar" ]]; then
         bash "$INSTALL_DIR/$script" || echo "  (el instalador terminó con error — revisa la salida)"
     else
         env "$envvar=$port" bash "$INSTALL_DIR/$script" || echo "  (el instalador terminó con error — revisa la salida)"
@@ -1165,7 +1156,6 @@ proto_menu() {
         badvpn)     name="BadVPN";     script="badvpn.sh";     unit="badvpn";            def="7300"; envvar="BADVPN_PORT" ;;
         stunnel4)   name="Stunnel4";   script="stunnel4.sh";   unit="stunnel4";          def="443";  envvar="STUNNEL_PORT" ;;
         hcr)        name="HCR";        script="hcr.sh";        unit="hcr-server";        def="8080"; envvar="HCR_PORT" ;;
-        bhttp)      name="BHTTP";      script="bhttp.sh";      unit="bhttp-server";      def="8087"; envvar="BHTTP_PORT" ;;
         chttp)      name="CHTTP";      script="chttp.sh";      unit="chttp";             def="8445"; envvar="CHTTP_PORT" ;;
         v2socks)    name="V2SOCKS";    script="v2socks.sh";    unit="v2socks";           def="8444"; envvar="V2SOCKS_PORT" ;;
         mustafa-ws) name="mustafa-ws"; script="mustafa-ws.sh"; unit="mustafa-ws";        def="444";  envvar="WS_PORT" ;;
@@ -1261,15 +1251,14 @@ protocols_menu() {
         printf '  [1] BadVPN        (UDP :%-5s)      %s\n' "$(proto_port badvpn 7300)" "$(unit_state badvpn)"
         printf '  [2] Stunnel4      (SSL :%-5s)      %s\n' "$(proto_port stunnel4 443)" "$(unit_state stunnel4)"
         printf '  [3] HCR           (TLS :%-5s)      %s\n' "$(proto_port hcr 8080)" "$(unit_state hcr-server)"
-        printf '  [4] BHTTP         (:%-5s)          %s\n' "$(proto_port bhttp 8087)" "$(unit_state bhttp-server)"
-        printf '  [5] CHTTP         (TLS :%-5s)      %s\n' "$(proto_port chttp 8445)" "$(unit_state chttp)"
-        printf '  [6] V2SOCKS       (señal :%-5s)    %s\n' "$(proto_port v2socks 8444)" "$(unit_state v2socks)"
-        printf '  [7] mustafa-ws    (WS :%-5s)       %s\n' "$(proto_port mustafa-ws 444)" "$(unit_state mustafa-ws)"
-        printf '  [8] CheckUser     (:%-5s)          %s\n' "$(proto_port checkuser 8888)" "$(unit_state checkuser)"
-        printf '  [9] Monitor App   (panel :80)      %s\n' "$(unit_state monitor-mustafa.timer)"
-        printf '  [10] Hysteria2    (UDP :%-5s)      %s\n' "$(proto_port hysteria2 443)" "$(unit_state hysteria2)"
-        printf '  [11] WSPLUS        (TLS :%-5s)      %s\n' "$(proto_port wsplus 8081)" "$(unit_state wsplus)"
-        printf '  [12] DOH           (TLS :%-5s)      %s\n' "$(proto_port doh 8053)" "$(unit_state doh)"
+        printf '  [4] CHTTP         (TLS :%-5s)      %s\n' "$(proto_port chttp 8445)" "$(unit_state chttp)"
+        printf '  [5] V2SOCKS       (señal :%-5s)    %s\n' "$(proto_port v2socks 8444)" "$(unit_state v2socks)"
+        printf '  [6] mustafa-ws    (WS :%-5s)       %s\n' "$(proto_port mustafa-ws 444)" "$(unit_state mustafa-ws)"
+        printf '  [7] CheckUser     (:%-5s)          %s\n' "$(proto_port checkuser 8888)" "$(unit_state checkuser)"
+        printf '  [8] Monitor App   (panel :80)      %s\n' "$(unit_state monitor-mustafa.timer)"
+        printf '  [9] Hysteria2     (UDP :%-5s)      %s\n' "$(proto_port hysteria2 443)" "$(unit_state hysteria2)"
+        printf '  [10] WSPLUS       (TLS :%-5s)      %s\n' "$(proto_port wsplus 8081)" "$(unit_state wsplus)"
+        printf '  [11] DOH          (TLS :%-5s)      %s\n' "$(proto_port doh 8053)" "$(unit_state doh)"
         printf '  [0] Volver\n'
         token="$(ws_conf TOKEN)"
         [[ -n "$token" ]] && printf '\n  TOKEN WS (mustafa-ws): %s\n' "$token"
@@ -1279,15 +1268,14 @@ protocols_menu() {
             1) proto_menu badvpn ;;
             2) proto_menu stunnel4 ;;
             3) proto_menu hcr ;;
-            4) proto_menu bhttp ;;
-            5) proto_menu chttp ;;
-            6) proto_menu v2socks ;;
-            7) proto_menu mustafa-ws ;;
-            8) proto_menu checkuser ;;
-            9) proto_menu monitor ;;
-            10) proto_menu hysteria2 ;;
-            11) proto_menu wsplus ;;
-            12) proto_menu doh ;;
+            4) proto_menu chttp ;;
+            5) proto_menu v2socks ;;
+            6) proto_menu mustafa-ws ;;
+            7) proto_menu checkuser ;;
+            8) proto_menu monitor ;;
+            9) proto_menu hysteria2 ;;
+            10) proto_menu wsplus ;;
+            11) proto_menu doh ;;
             0) return 0 ;;
             *) echo "  Opción no válida: $opt"; sleep 1 ;;
         esac

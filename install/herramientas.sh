@@ -119,9 +119,9 @@ PATHS=()
 for p in /etc/mustafa /etc/passwd /etc/shadow /etc/group /etc/gshadow \
          /etc/ssh/sshd_config /usr/local/etc/xray \
          /etc/nginx/sites-available/mustafa /etc/nginx/sites-enabled/mustafa \
-         /etc/hysteria2 /etc/chttp /etc/v2socks /etc/hcr /etc/bhttp \
+         /etc/hysteria2 /etc/chttp /etc/v2socks /etc/hcr \
          /etc/mustafa-ws /etc/stunnel /etc/fail2ban/jail.local \
-         /etc/sysctl.d/99-mustafa-bbr.conf; do
+         /etc/sysctl.d/99-mustafa-bbr.conf /opt/knightbot/session; do
     [[ -e "$p" ]] && PATHS+=("$p")
 done
 [[ "${#PATHS[@]}" -gt 0 ]] || { echo "Nada que respaldar."; exit 1; }

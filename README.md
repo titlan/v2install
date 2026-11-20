@@ -70,15 +70,14 @@ mustafa-ws). Desinstalar borra el servicio, el binario y su configuración.
 | 1 | BadVPN (udpgw) | 7300 (TCP, pasarela UDP) | `install/badvpn.sh` (binario precompilado amd64, segundos; si no es amd64 compila desde ambrop72/badvpn) |
 | 2 | Stunnel4 (SSH+SSL) | 443, o 4443 si Xray ocupa el 443 | `install/stunnel4.sh` (unidad systemd nativa) |
 | 3 | HCR | 8080 TLS | `install/hcr.sh` (compila desde `install/hcr-src/`) |
-| 4 | BHTTP | 8087 | `install/bhttp.sh` (compila desde `install/bhttp-src/`, solo x86_64) |
-| 5 | CHTTP | 8445 TLS | `install/chttp.sh` (compila desde `install/chttp-src/`) |
-| 6 | V2SOCKS | señal 8444, UDP 3478 (fijo) | `install/v2socks.sh` (compila desde `install/v2socks-src/`) |
-| 7 | mustafa-ws (SSH/WS) | 444 | `install/mustafa-ws.sh` (compila desde `install/ws-src/`) |
-| 8 | CheckUser | :80 público (vía Nginx) / 8888 loopback + **HTTPS :8443** (stunnel -> Nginx, con el cert Let's Encrypt del dominio; la app lo necesita en datos Telcel) | `install/checkuser.sh` + `install/checkuser-https.sh` |
-| 9 | Monitor App | panel en `http://IP/monitor.html` (sin puerto propio) | `install/monitor.sh` |
-| 10 | Hysteria2 (QUIC/UDP) | 443 UDP | `install/hysteria2.sh` (binario oficial HyNetwork/hysteria, SHA-256 verificado) |
-| 11 | WSPLUS (Upgrade 101) | 8081 TLS | `install/wsplus.sh` (compila desde `install/wsplus-src/`) |
-| 12 | DOH (DNS over HTTPS) | 8053 TLS | `install/doh.sh` (compila desde `install/doh-src/`) |
+| 4 | CHTTP | 8445 TLS | `install/chttp.sh` (compila desde `install/chttp-src/`) |
+| 5 | V2SOCKS | señal 8444, UDP 3478 (fijo) | `install/v2socks.sh` (compila desde `install/v2socks-src/`) |
+| 6 | mustafa-ws (SSH/WS) | 444 | `install/mustafa-ws.sh` (compila desde `install/ws-src/`) |
+| 7 | CheckUser | :80 público (vía Nginx) / 8888 loopback + **HTTPS :8443** (stunnel -> Nginx, con el cert Let's Encrypt del dominio; la app lo necesita en datos Telcel) | `install/checkuser.sh` + `install/checkuser-https.sh` |
+| 8 | Monitor App | panel en `http://IP/monitor.html` (sin puerto propio) | `install/monitor.sh` |
+| 9 | Hysteria2 (QUIC/UDP) | 443 UDP | `install/hysteria2.sh` (binario oficial HyNetwork/hysteria, SHA-256 verificado) |
+| 10 | WSPLUS (Upgrade 101) | 8081 TLS | `install/wsplus.sh` (compila desde `install/wsplus-src/`) |
+| 11 | DOH (DNS over HTTPS) | 8053 TLS | `install/doh.sh` (compila desde `install/doh-src/`) |
 
 La base (sin entrar al menú [03]) ya instala: Xray (VLESS Reality :443,
 VMess WS :10086, VLESS WS :10087, **VLESS XHTTP :10088**), Nginx proxy
@@ -112,7 +111,6 @@ estado en `/var/www/html/monitor.html` (lo sirve Nginx en el :80).
 | `install/badvpn.sh` + `install/badvpn-udpgw-amd64.b64` | Instalador BadVPN: usa el binario precompilado amd64 (base64, SHA-256 verificado) en segundos; en otra arquitectura compila desde fuente |
 | `install/stunnel4.sh` | Instalador Stunnel4 (unidad systemd nativa) |
 | `install/hcr.sh` + `install/hcr-src/` | HCR (fuente Go limpia) |
-| `install/bhttp.sh` + `install/bhttp-src/` | BHTTP (fuente Go) |
 | `install/chttp.sh` + `install/chttp-src/` | CHTTP (fuente Go) |
 | `install/v2socks.sh` + `install/v2socks-src/` | V2SOCKS (fuente Go) |
 | `install/mustafa-ws.sh` + `install/ws-src/` | mustafa-ws (fuente Go) |
@@ -136,7 +134,7 @@ lleva binarios.
 22 SSH · 80 HTTP/Nginx/CheckUser/Monitor · 443 Xray VLESS Reality
 (o Stunnel4 si Xray no lo ocupa; el puerto Reality se cambia en [02] → [8],
 se guarda en `/etc/mustafa/ports/v2ray` y sobrevive a reinstalaciones) · 444 mustafa-ws · 7300 BadVPN UDP ·
-8080 HCR · 8081 WSPLUS · 8087 BHTTP · **8443 CheckUser HTTPS** · 8444 V2SOCKS señal · 8445 CHTTP · 8888 CheckUser
+8080 HCR · 8081 WSPLUS · **8443 CheckUser HTTPS** · 8444 V2SOCKS señal · 8445 CHTTP · 8888 CheckUser
 · **8053 DOH** · 10086 VMess WS · 10087 VLESS WS · 10088 VLESS XHTTP · 443 Xray/Reality.
 (loopback) · 10086 VMess WS · 10087 VLESS WS · 10088 VLESS XHTTP ·
 UDP 3478 V2SOCKS · UDP 443 Hysteria2 · 5667 ZIVPN UDP (futuro).
@@ -150,7 +148,7 @@ de loopback (el público sigue siendo el :80 de Nginx).
 
 Versión **1.0**. Primera instalación real completada en un VPS limpio
 (2026-11-19, base Xray + menú funcionando). Los instaladores de
-protocolos (CHTTP, V2SOCKS, HCR, BHTTP, mustafa-ws, Stunnel4, CheckUser,
+protocolos (CHTTP, V2SOCKS, HCR, mustafa-ws, Stunnel4, CheckUser,
 Monitor, Xray standalone, Hysteria2, WSPLUS, DOH) se probaron de punta a punta en local:
 instalación con puerto elegido, cambio de puerto, desinstalación y
 verificación de que el servicio escucha en el puerto. WSPLUS además se
