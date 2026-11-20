@@ -207,6 +207,7 @@ ok "Claves Reality generadas (pública guardada en $STATE_DIR/info)."
 #         se reenvía al sitio real de destino (camuflaje).
 #  :10086 VMess + WebSocket (ruta /vmess) — lo sirve Nginx en el puerto 80.
 #  :10087 VLESS + WebSocket (ruta /vless) — lo sirve Nginx en el puerto 80.
+#  :10088 VLESS + XHTTP (ruta /xhttp) — lo sirve Nginx en el puerto 80.
 cat > "$XRAY_CONF" <<EOF
 {
   "log": {
@@ -264,6 +265,20 @@ cat > "$XRAY_CONF" <<EOF
         "wsSettings": { "path": "/vless" }
       },
       "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10088,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{ "id": "$USER_UUID" }],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": { "path": "/xhttp" }
+      },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
     }
   ],
   "outbounds": [
@@ -303,7 +318,7 @@ systemctl daemon-reload
 systemctl enable --now xray.service
 sleep 2
 systemctl is-active --quiet xray.service || die "Xray no arrancó. Revisa: journalctl -u xray -n 50"
-ok "Xray activo (VLESS Reality :443, VMess WS :10086, VLESS WS :10087)."
+ok "Xray activo (VLESS Reality :443, VMess WS :10086, VLESS WS :10087, VLESS XHTTP :10088)."
 
 # =============================================================================
 #  4. Nginx — proxy WebSocket + reto ACME + página base
@@ -354,6 +369,17 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
+    # XHTTP -> Xray (VLESS)
+    location /xhttp {
+        proxy_pass http://127.0.0.1:10088;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
     # checkUser (MUSTAFA) -> 127.0.0.1:8888 (tarjetas Online/Vence de la app)
     location /checkUser {
         proxy_pass http://127.0.0.1:8888;
@@ -383,7 +409,7 @@ nginx -t || die "La configuración de Nginx tiene errores."
 systemctl enable --now nginx
 systemctl reload nginx
 systemctl is-active --quiet nginx || die "Nginx no arrancó."
-ok "Nginx activo (proxy WS en :80, rutas /vmess y /vless)."
+ok "Nginx activo (proxy WS/XHTTP en :80, rutas /vmess, /vless y /xhttp)."
 
 # =============================================================================
 #  5. OpenSSH (puerto 22)
@@ -560,8 +586,8 @@ echo "  Versión : $VERSION"
 echo "  Sistema : $OS_NAME"
 echo "  IPv4    : ${IPV4:-?}"
 echo "  Dominio : ${DOMAIN:-sin dominio}"
-echo "  Xray    : $XRAY_TAG — VLESS Reality :443, VMess WS :10086, VLESS WS :10087"
-echo "  Nginx   : proxy WS :80 (/vmess, /vless)"
+echo "  Xray    : $XRAY_TAG — VLESS Reality :443, VMess WS :10086, VLESS WS :10087, VLESS XHTTP :10088"
+echo "  Nginx   : proxy WS/XHTTP :80 (/vmess, /vless, /xhttp)"
 echo "  SSH     : puerto 22"
 echo "  SSH/WS  : mustafa-ws en :444 -> 127.0.0.1:22 (TOKEN: ${WS_TOKEN:-pendiente})"
 echo "  UUID    : $USER_UUID"

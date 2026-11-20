@@ -7,6 +7,7 @@
 #    :443   VLESS + Reality (sin dominio)
 #    :10086 VMess + WebSocket /vmess  (lo sirve Nginx en el :80)
 #    :10087 VLESS + WebSocket /vless  (lo sirve Nginx en el :80)
+#    :10088 VLESS + XHTTP /xhttp      (lo sirve Nginx en el :80)
 #
 #  Uso (desde el menú MUSTAFA o directo):
 #      sudo bash install/xray.sh
@@ -130,6 +131,7 @@ if [[ "$KEEP_CONFIG" == 0 ]]; then
     #         se reenvía al sitio real de destino (camuflaje).
     #  :10086 VMess + WebSocket (ruta /vmess) — lo sirve Nginx en el puerto 80.
     #  :10087 VLESS + WebSocket (ruta /vless) — lo sirve Nginx en el puerto 80.
+    #  :10088 VLESS + XHTTP (ruta /xhttp) — lo sirve Nginx en el puerto 80.
     cat > "$XRAY_CONF" <<EOF
 {
   "log": {
@@ -187,6 +189,20 @@ if [[ "$KEEP_CONFIG" == 0 ]]; then
         "wsSettings": { "path": "/vless" }
       },
       "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10088,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{ "id": "$USER_UUID" }],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": { "path": "/xhttp" }
+      },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
     }
   ],
   "outbounds": [
@@ -201,6 +217,33 @@ if [[ "$KEEP_CONFIG" == 0 ]]; then
 }
 EOF
     ok "Claves Reality generadas (pública guardada en $STATE_DIR/info)."
+fi
+
+# --- Migrar config existente: agregar entrada XHTTP si falta ------------------
+# (las instalaciones hechas antes de XHTTP no la tienen; se agrega sin tocar
+#  las entradas existentes ni los UUID, y se valida antes de reiniciar)
+if [[ "$KEEP_CONFIG" == 1 ]]; then
+    if ! jq -e '.inbounds[] | select(.streamSettings.network == "xhttp")' "$XRAY_CONF" >/dev/null 2>&1; then
+        XHTTP_CLIENTS="$(jq -c '[.inbounds[].settings.clients[]?.id] | unique | map({id:.})' "$XRAY_CONF" 2>/dev/null || true)"
+        if [[ -n "$XHTTP_CLIENTS" && "$XHTTP_CLIENTS" != "[]" ]]; then
+            tmp="$(mktemp)"
+            if jq --argjson clients "$XHTTP_CLIENTS" \
+                '.inbounds += [{"listen":"127.0.0.1","port":10088,"protocol":"vless","settings":{"clients":$clients,"decryption":"none"},"streamSettings":{"network":"xhttp","xhttpSettings":{"path":"/xhttp"}},"sniffing":{"enabled":true,"destOverride":["http","tls"]}}]' \
+                "$XRAY_CONF" > "$tmp" 2>/dev/null; then
+                cp "$XRAY_CONF" "$XRAY_CONF.bak"
+                mv "$tmp" "$XRAY_CONF"
+                if "$XRAY_DIR/xray" run -test -config "$XRAY_CONF" >/dev/null 2>&1; then
+                    ok "Entrada XHTTP agregada a la config existente (:10088 /xhttp)."
+                else
+                    mv "$XRAY_CONF.bak" "$XRAY_CONF"
+                    echo "  (la config con XHTTP no pasó la prueba; se restauró la anterior)"
+                fi
+            else
+                rm -f "$tmp"
+                echo "  (no se pudo agregar XHTTP a la config; se deja como está)"
+            fi
+        fi
+    fi
 fi
 
 # --- /etc/mustafa/info: conservar version/domain, actualizar solo Xray --------
@@ -245,12 +288,49 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now xray
+systemctl enable xray
+# restart (no --now): si xray ya corría con una config vieja, --now no lo
+# reinicia y la migración de XHTTP no surtiría efecto.
+systemctl restart xray
 sleep 2
 systemctl is-active --quiet xray || die "Xray no arrancó. Revisa: journalctl -u xray -n 50"
 ok "Xray activo."
+
+# --- Nginx: asegurar proxy /xhttp (migración de instalaciones viejas) ---------
+# (install.sh ya escribe el bloque en instalaciones nuevas; aquí solo se
+#  agrega si el sitio existe y no lo tiene)
+NGINX_SITE="/etc/nginx/sites-available/mustafa"
+if [[ -f "$NGINX_SITE" ]] && ! grep -q 'location /xhttp' "$NGINX_SITE"; then
+    python3 - "$NGINX_SITE" <<'PYEOF'
+import sys
+site = sys.argv[1]
+block = """    # XHTTP -> Xray (VLESS)
+    location /xhttp {
+        proxy_pass http://127.0.0.1:10088;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+"""
+text = open(site).read()
+marker = "    location / {"
+if "location /xhttp" not in text and marker in text:
+    text = text.replace(marker, block + marker, 1)
+    open(site, "w").write(text)
+PYEOF
+    if nginx -t >/dev/null 2>&1; then
+        systemctl reload nginx 2>/dev/null || true
+        ok "Proxy Nginx /xhttp agregado."
+    else
+        echo "  (no se pudo agregar el proxy /xhttp a Nginx; revisa $NGINX_SITE)"
+    fi
+fi
 echo
-echo "  Xray      : $XRAY_TAG (VLESS Reality :443, VMess WS :10086, VLESS WS :10087)"
+echo "  Xray      : $XRAY_TAG (VLESS Reality :443, VMess WS :10086, VLESS WS :10087, VLESS XHTTP :10088)"
 echo "  UUID base : $USER_UUID"
 echo "  Servicio  : xray.service"
 echo "  Config    : $XRAY_CONF"

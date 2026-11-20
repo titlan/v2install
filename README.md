@@ -48,7 +48,7 @@ sudo MUSTAFA_KEY=MUSTAFA-XXXX-XXXX-XXXX-XXXX bash install.sh [dominio]
 | Opción | Qué hace |
 | ------ | -------- |
 | `[01] MENU SSH` | Crear / remover / bloquear / editar / renovar usuarios SSH, mostrar cuentas, usuarios conectados, eliminar vencidos |
-| `[02] MENU V2RAY` | Mostrar cuentas UUID y enlaces (VLESS Reality, VMess WS, VLESS WS), agregar/eliminar UUID, reiniciar Xray, estado, **instalar / desinstalar V2Ray** |
+| `[02] MENU V2RAY` | Mostrar cuentas UUID y enlaces (VLESS Reality, VMess WS, VLESS WS, **VLESS XHTTP** — se elige el transporte al mostrar o agregar), agregar/eliminar UUID, reiniciar Xray, estado, **instalar / desinstalar V2Ray** |
 | `[03] INSTALAR PROTOCOLOS` | Cada protocolo trae **Instalar / Desinstalar / Cambiar puerto** (ver tabla). Muestra `[ON]` / `[OFF]` / `[--]` y el puerto actual |
 | `[04] GENERADOR DE KEY` | Generar / listar / revocar keys, exportar hashes para el repo |
 | `[00] SALIR` | Salir del menú |
@@ -77,8 +77,16 @@ mustafa-ws). Desinstalar borra el servicio, el binario y su configuración.
 | 9 | Monitor App | panel en `http://IP/monitor.html` (sin puerto propio) | `install/monitor.sh` |
 
 La base (sin entrar al menú [03]) ya instala: Xray (VLESS Reality :443,
-VMess WS :10086, VLESS WS :10087), Nginx proxy WS :80 (`/vmess`, `/vless`,
-`/checkUser`, `/server/online`), OpenSSH :22 y mustafa-ws :444 con TOKEN.
+VMess WS :10086, VLESS WS :10087, **VLESS XHTTP :10088**), Nginx proxy
+WS/XHTTP :80 (`/vmess`, `/vless`, `/xhttp`, `/checkUser`, `/server/online`),
+OpenSSH :22 y mustafa-ws :444 con TOKEN.
+
+En el menú [02], al mostrar cuentas o agregar un UUID, se pregunta qué
+transporte mostrar: Todos, solo Reality, solo WebSocket o solo XHTTP.
+El UUID funciona en los 4 transportes; la elección solo cambia qué
+enlace se muestra. Al reinstalar V2Ray con [02] → [6], si la config
+existente no tiene XHTTP, se le agrega sin tocar los UUID ni las claves
+Reality (y Nginx recibe el proxy `/xhttp` si le falta).
 
 CheckUser escucha en loopback `127.0.0.1:8888` (configurable) y Nginx lo
 publica en el :80 (`/checkUser` y `/server/online`), para que las tarjetas
@@ -117,8 +125,8 @@ lleva binarios.
 22 SSH · 80 HTTP/Nginx/CheckUser/Monitor · 443 Xray VLESS Reality
 (o Stunnel4 si Xray no lo ocupa) · 444 mustafa-ws · 7300 BadVPN UDP ·
 8080 HCR · 8087 BHTTP · 8444 V2SOCKS señal · 8445 CHTTP · 8888 CheckUser
-(loopback) · UDP 3478 V2SOCKS · UDP 443 Hysteria2 (futuro) · 5667 ZIVPN
-UDP (futuro).
+(loopback) · 10086 VMess WS · 10087 VLESS WS · 10088 VLESS XHTTP ·
+UDP 3478 V2SOCKS · UDP 443 Hysteria2 (futuro) · 5667 ZIVPN UDP (futuro).
 
 Todos los puertos de la tabla de protocolos se pueden cambiar desde el
 menú [03] (cada protocolo → [3] Cambiar puerto); V2SOCKS cambia solo el

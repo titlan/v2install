@@ -489,37 +489,69 @@ v2ray_host() {
 }
 
 # Imprime los 3 enlaces (VLESS Reality, VMess WS, VLESS WS) de un UUID
+# Pregunta qué transporte mostrar en los enlaces de V2Ray.
+# Devuelve por stdout: todos | reality | ws | xhttp  (Enter = todos).
+# El menú se escribe a stderr para que la captura $(...) solo tome la respuesta
+# (una función que imprime a stdout NO debe capturarse con $(...)).
+v2ray_elegir_transporte() {
+    local r
+    {
+        echo
+        echo "  Transporte a mostrar:"
+        echo "    [1] Todos (Reality + WebSocket + XHTTP)"
+        echo "    [2] Solo Reality"
+        echo "    [3] Solo WebSocket"
+        echo "    [4] Solo XHTTP"
+    } >&2
+    read -rp "  Elige [1-4] (Enter = Todos): " r
+    case "$r" in
+        2) echo "reality" ;;
+        3) echo "ws" ;;
+        4) echo "xhttp" ;;
+        *) echo "todos" ;;
+    esac
+}
+
 v2ray_links() {
-    local uuid=$1 name=$2 host=$3 pub sid
+    local uuid=$1 name=$2 host=$3 transp=${4:-todos} pub sid
     pub="$(info_val reality_public)"; sid="$(info_val reality_shortid)"
     echo
     printf '  %b%s%b  (%s)\n' "$C_GREEN_B" "$name" "$C_RESET" "$uuid"
-    printf '  VLESS Reality: vless://%s@%s:443?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=%s&sid=%s&type=tcp&flow=xtls-rprx-vision#%s\n' \
-        "$uuid" "$host" "$pub" "$sid" "$name"
-    local vmess_json
-    vmess_json="$(jq -n --arg ps "$name" --arg add "$host" --arg id "$uuid" \
-        '{v:"2",ps:$ps,add:$add,port:"80",id:$id,aid:"0",net:"ws",type:"none",host:$add,path:"/vmess",tls:""}' 2>/dev/null | base64 -w0)"
-    printf '  VMess WS     : vmess://%s\n' "$vmess_json"
-    printf '  VLESS WS     : vless://%s@%s:80?encryption=none&security=none&type=ws&host=%s&path=/vless#%s\n' \
-        "$uuid" "$host" "$host" "$name"
+    if [[ "$transp" == todos || "$transp" == reality ]]; then
+        printf '  VLESS Reality: vless://%s@%s:443?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=%s&sid=%s&type=tcp&flow=xtls-rprx-vision#%s\n' \
+            "$uuid" "$host" "$pub" "$sid" "$name"
+    fi
+    if [[ "$transp" == todos || "$transp" == ws ]]; then
+        local vmess_json
+        vmess_json="$(jq -n --arg ps "$name" --arg add "$host" --arg id "$uuid" \
+            '{v:"2",ps:$ps,add:$add,port:"80",id:$id,aid:"0",net:"ws",type:"none",host:$add,path:"/vmess",tls:""}' 2>/dev/null | base64 -w0)"
+        printf '  VMess WS     : vmess://%s\n' "$vmess_json"
+        printf '  VLESS WS     : vless://%s@%s:80?encryption=none&security=none&type=ws&host=%s&path=/vless#%s\n' \
+            "$uuid" "$host" "$host" "$name"
+    fi
+    if [[ "$transp" == todos || "$transp" == xhttp ]]; then
+        printf '  VLESS XHTTP  : vless://%s@%s:80?encryption=none&security=none&type=xhttp&host=%s&path=/xhttp#%s\n' \
+            "$uuid" "$host" "$host" "$name"
+    fi
 }
 
 v2ray_show() {
-    local host uuid i=0 principal
+    local host uuid i=0 principal transp
     if [[ ! -f "$XRAY_CONF" ]]; then
         echo "  Xray no está instalado (falta $XRAY_CONF)."
         return
     fi
     host="$(v2ray_host)"
     principal="$(info_val xray_uuid)"
+    transp="$(v2ray_elegir_transporte)"
     echo
     while read -r uuid; do
         [[ -z "$uuid" ]] && continue
         i=$((i+1))
         if [[ "$uuid" == "$principal" ]]; then
-            v2ray_links "$uuid" "MUSTAFA-PRINCIPAL" "$host"
+            v2ray_links "$uuid" "MUSTAFA-PRINCIPAL" "$host" "$transp"
         else
-            v2ray_links "$uuid" "MUSTAFA-$i" "$host"
+            v2ray_links "$uuid" "MUSTAFA-$i" "$host" "$transp"
         fi
     done < <(v2ray_uuids)
     [[ $i -eq 0 ]] && echo "  (sin cuentas UUID en la configuración de Xray)"
@@ -554,7 +586,7 @@ v2ray_add() {
     fi
     echo
     printf '  Nuevo usuario UUID: %b%s%b\n' "$C_GREEN_B" "$uuid" "$C_RESET"
-    v2ray_links "$uuid" "MUSTAFA-NUEVO" "$(v2ray_host)"
+    v2ray_links "$uuid" "MUSTAFA-NUEVO" "$(v2ray_host)" "$(v2ray_elegir_transporte)"
 }
 
 v2ray_del() {
