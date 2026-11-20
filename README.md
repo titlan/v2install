@@ -47,7 +47,7 @@ sudo MUSTAFA_KEY=MUSTAFA-XXXX-XXXX-XXXX-XXXX bash install.sh [dominio]
 
 | Opción | Qué hace |
 | ------ | -------- |
-| `[01] MENU SSH` | Crear / remover / bloquear / editar / renovar usuarios SSH, mostrar cuentas, usuarios conectados, eliminar vencidos |
+| `[01] MENU SSH` | Crear / remover / bloquear / editar / renovar usuarios SSH, **crear banner SSH [6]** (instala el banner MUSTAFA o uno personalizado, o lo quita — texto que OpenSSH muestra antes de pedir la contraseña), mostrar cuentas, usuarios conectados, eliminar vencidos |
 | `[02] MENU V2RAY` | Mostrar cuentas UUID y enlaces (VLESS Reality, VMess WS, VLESS WS, **VLESS XHTTP** — se elige el transporte al mostrar; los enlaces solo se muestran para los protocolos donde el UUID existe), **agregar usuario UUID eligiendo el protocolo** [2] (Todos / Solo Reality / Solo WebSocket / Solo XHTTP — el UUID solo se crea en esos inbounds), eliminar UUID, **cambiar puerto Reality [8]**, **modificar UUID [9]** (escribir uno o generar aleatorio), reiniciar Xray, estado, **instalar / desinstalar V2Ray** |
 | `[03] INSTALAR PROTOCOLOS` | Cada protocolo trae **Instalar / Desinstalar / Cambiar puerto** (ver tabla). Muestra `[ON]` / `[OFF]` / `[--]` y el puerto actual |
 | `[04] GENERADOR DE KEY` | Generar / listar / revocar keys, exportar hashes para el repo |
