@@ -126,6 +126,11 @@ if [[ "$KEEP_CONFIG" == 0 ]]; then
     USER_UUID="$(cat /proc/sys/kernel/random/uuid)"
     SHORT_ID="$(openssl rand -hex 4)"
 
+    # Puerto Reality guardado por el menú [02] -> [8] (default 443).
+    # Así una reinstalación limpia respeta el puerto que David eligió.
+    REALITY_PORT="$(cat "$STATE_DIR/ports/v2ray" 2>/dev/null || echo 443)"
+    case "$REALITY_PORT" in ""|*[!0-9]*) REALITY_PORT=443 ;; esac
+
     # --- Configuración base de Xray ------------------------------------------
     #  :443   VLESS + Reality (sin dominio) — el tráfico que no es Reality
     #         se reenvía al sitio real de destino (camuflaje).
@@ -141,7 +146,7 @@ if [[ "$KEEP_CONFIG" == 0 ]]; then
   },
   "inbounds": [
     {
-      "port": 443,
+      "port": $REALITY_PORT,
       "protocol": "vless",
       "settings": {
         "clients": [
@@ -329,8 +334,11 @@ PYEOF
         echo "  (no se pudo agregar el proxy /xhttp a Nginx; revisa $NGINX_SITE)"
     fi
 fi
+# Puerto Reality efectivo (de la config, que es la verdad).
+REALITY_PORT="$(jq -r '.inbounds[] | select(.streamSettings.security == "reality") | .port' "$XRAY_CONF" 2>/dev/null | head -n 1 || true)"
+[[ -z "$REALITY_PORT" || "$REALITY_PORT" == "null" ]] && REALITY_PORT=443
 echo
-echo "  Xray      : $XRAY_TAG (VLESS Reality :443, VMess WS :10086, VLESS WS :10087, VLESS XHTTP :10088)"
+echo "  Xray      : $XRAY_TAG (VLESS Reality :$REALITY_PORT, VMess WS :10086, VLESS WS :10087, VLESS XHTTP :10088)"
 echo "  UUID base : $USER_UUID"
 echo "  Servicio  : xray.service"
 echo "  Config    : $XRAY_CONF"

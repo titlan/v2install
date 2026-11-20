@@ -48,10 +48,10 @@ sudo MUSTAFA_KEY=MUSTAFA-XXXX-XXXX-XXXX-XXXX bash install.sh [dominio]
 | Opción | Qué hace |
 | ------ | -------- |
 | `[01] MENU SSH` | Crear / remover / bloquear / editar / renovar usuarios SSH, mostrar cuentas, usuarios conectados, eliminar vencidos |
-| `[02] MENU V2RAY` | Mostrar cuentas UUID y enlaces (VLESS Reality, VMess WS, VLESS WS, **VLESS XHTTP** — se elige el transporte al mostrar o agregar), agregar/eliminar UUID, reiniciar Xray, estado, **instalar / desinstalar V2Ray** |
+| `[02] MENU V2RAY` | Mostrar cuentas UUID y enlaces (VLESS Reality, VMess WS, VLESS WS, **VLESS XHTTP** — se elige el transporte al mostrar o agregar), agregar/eliminar UUID, **cambiar puerto Reality [8]**, **modificar UUID [9]** (escribir uno o generar aleatorio), reiniciar Xray, estado, **instalar / desinstalar V2Ray** |
 | `[03] INSTALAR PROTOCOLOS` | Cada protocolo trae **Instalar / Desinstalar / Cambiar puerto** (ver tabla). Muestra `[ON]` / `[OFF]` / `[--]` y el puerto actual |
 | `[04] GENERADOR DE KEY` | Generar / listar / revocar keys, exportar hashes para el repo |
-| `[05] HERRAMIENTAS 🔐` | **Fail2Ban** (bloquea fuerza bruta SSH), **BBR** (más velocidad TCP), **vnStat** (tráfico por día/mes), **respaldo** de usuarios/keys/configs (`/root/mustafa-backup-*.tar.gz`) |
+| `[05] HERRAMIENTAS 🔐` | **Fail2Ban** (bloquea fuerza bruta SSH), **BBR** (más velocidad TCP), **vnStat** (tráfico por día/mes), **respaldo** de usuarios/keys/configs (`/root/mustafa-backup-*.tar.gz`), **bot WhatsApp** (Knightbot-MD, Baileys: administra grupos con `.tagall`, `.kick`, `.ban`, `.mute`, `.warn`, `.antilink`, juegos, IA, stickers; se vincula con código de pareo, SIM de prepago) |
 | `[00] SALIR` | Salir del menú |
 | `[88] REINICIAR VPS` | Reinicia el VPS (pide confirmación) |
 
@@ -106,7 +106,7 @@ estado en `/var/www/html/monitor.html` (lo sirve Nginx en el :80).
 | Archivo | Qué es |
 | ------- | ------ |
 | `install.sh` | Instalador base + validación de KEY |
-| `install/xray.sh` | Instalador standalone de Xray (para [02] → [6] Instalar V2Ray; también `--uninstall`) |
+| `install/xray.sh` | Instalador standalone de Xray (para [02] → [6] Instalar V2Ray; también `--uninstall`). Respeta el puerto Reality guardado en `/etc/mustafa/ports/v2ray` (por [02] → [8]) en una instalación limpia; si hay config válida la reutiliza (KEEP_CONFIG) |
 | `mustafa` | Menú principal (se instala como comando `mustafa`) |
 | `keys.sha256` | Registro de hashes de keys válidas |
 | `install/badvpn.sh`, `install/stunnel4.sh` | Instaladores BadVPN / Stunnel4 |
@@ -121,6 +121,7 @@ estado en `/var/www/html/monitor.html` (lo sirve Nginx en el :80).
 | `install/doh.sh` + `install/doh-src/` | DOH (fuente Go) |
 | `install/monitor.sh` | Monitor App |
 | `install/herramientas.sh` | Herramientas (Fail2Ban + BBR + vnStat + respaldo `mustafa-backup`) |
+| `install/knightbot.sh` | Bot WhatsApp Knightbot-MD (clona el repo público, instala Node 20 si hace falta, `npm install`, servicio `knightbot.service`, código de pareo) |
 | `README.md` | Este archivo |
 
 Los instaladores de protocolos se copian a `/etc/mustafa/install/` para
@@ -131,7 +132,8 @@ lleva binarios.
 ## Puertos
 
 22 SSH · 80 HTTP/Nginx/CheckUser/Monitor · 443 Xray VLESS Reality
-(o Stunnel4 si Xray no lo ocupa) · 444 mustafa-ws · 7300 BadVPN UDP ·
+(o Stunnel4 si Xray no lo ocupa; el puerto Reality se cambia en [02] → [8],
+se guarda en `/etc/mustafa/ports/v2ray` y sobrevive a reinstalaciones) · 444 mustafa-ws · 7300 BadVPN UDP ·
 8080 HCR · 8081 WSPLUS · 8087 BHTTP · 8444 V2SOCKS señal · 8445 CHTTP · 8888 CheckUser
 · **8053 DOH** · 10086 VMess WS · 10087 VLESS WS · 10088 VLESS XHTTP · 443 Xray/Reality.
 (loopback) · 10086 VMess WS · 10087 VLESS WS · 10088 VLESS XHTTP ·
@@ -157,6 +159,16 @@ pero mucho más difícil de detectar: su papel es el camino sigiloso cuando
 los demás están bloqueados. Las herramientas
 [05] (Fail2Ban, vnStat, respaldo) también se probaron en local vía el
 menú; BBR no se pudo probar en la VM de pruebas (su kernel no trae el
-módulo tcp_bbr) — en un VPS Ubuntu normal sí está disponible. Falta
+módulo tcp_bbr) — en un VPS Ubuntu normal sí está disponible. El bot
+WhatsApp (Knightbot-MD) también se probó en local vía el menú [05]:
+instalación (Node 20 + 599 paquetes npm + servicio activo), menú [6]
+(código de pareo) y [7] (log) y [8] (desinstalación limpia); en la VM
+de pruebas el bot no pudo conectar con WhatsApp (el proxy de egreso
+rompe el WebSocket TLS), así que el código de pareo solo se verá en
+un VPS real. Dos bugs encontrados en la prueba y corregidos: (1) el
+instalador asumía que `npm` existe si existe `node` — en sistemas con
+node standalone falta y ahora se instala el paquete nodejs completo;
+(2) el grep del código de pareo leía el hostname del journal y daba un
+código falso — ahora usa `journalctl -o cat`. Falta
 probar cada protocolo en el VPS real y una conexión de la app de punta
 a punta.

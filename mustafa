@@ -11,7 +11,7 @@
 #                                V2SOCKS, mustafa-ws, CheckUser, Monitor App,
 #                                Hysteria2, WSPLUS, DOH
 #    [04] GENERADOR DE KEY     — generar/revocar keys de instalación
-#    [05] HERRAMIENTAS 🔐      — Fail2Ban + BBR + vnStat + respaldo
+#    [05] HERRAMIENTAS 🔐      — Fail2Ban + BBR + vnStat + respaldo + bot WhatsApp
 #    [00] SALIR   [88] REINICIAR VPS
 #
 #  Los instaladores de protocolos viven en /etc/mustafa/install/
@@ -523,13 +523,14 @@ v2ray_elegir_transporte() {
 }
 
 v2ray_links() {
-    local uuid=$1 name=$2 host=$3 transp=${4:-todos} pub sid
+    local uuid=$1 name=$2 host=$3 transp=${4:-todos} pub sid rport
     pub="$(info_val reality_public)"; sid="$(info_val reality_shortid)"
+    rport="$(v2ray_reality_port)"
     echo
     printf '  %b%s%b  (%s)\n' "$C_GREEN_B" "$name" "$C_RESET" "$uuid"
     if [[ "$transp" == todos || "$transp" == reality ]]; then
-        printf '  VLESS Reality: vless://%s@%s:443?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=%s&sid=%s&type=tcp&flow=xtls-rprx-vision#%s\n' \
-            "$uuid" "$host" "$pub" "$sid" "$name"
+        printf '  VLESS Reality: vless://%s@%s:%s?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=%s&sid=%s&type=tcp&flow=xtls-rprx-vision#%s\n' \
+            "$uuid" "$host" "$rport" "$pub" "$sid" "$name"
     fi
     if [[ "$transp" == todos || "$transp" == ws ]]; then
         local vmess_json
@@ -630,6 +631,143 @@ v2ray_del() {
     echo "  UUID eliminado: $uuid"
 }
 
+# Puerto actual del inbound VLESS + Reality (el público). Si no hay
+# config o no hay inbound Reality, 443.
+v2ray_reality_port() {
+    local p=""
+    [[ -f "$XRAY_CONF" ]] && p="$(jq -r '.inbounds[] | select(.streamSettings.security == "reality") | .port' "$XRAY_CONF" 2>/dev/null | head -n 1 || true)"
+    [[ -z "$p" || "$p" == "null" ]] && p="443"
+    printf '%s' "$p"
+}
+
+# [8] Cambiar el puerto de VLESS + Reality (el público, default 443).
+# Los puertos de WebSocket/XHTTP son internos (127.0.0.1) y los publica
+# Nginx en el :80, así que no se tocan. El puerto se guarda en
+# /etc/mustafa/ports/v2ray para que una reinstalación lo respete.
+v2ray_port() {
+    local cur new tmp c
+    if [[ ! -f "$XRAY_CONF" ]]; then
+        echo "  Xray no está instalado."
+        return
+    fi
+    cur="$(v2ray_reality_port)"
+    echo
+    echo "  Puerto actual de VLESS Reality: $cur"
+    echo "  (Los de WebSocket/XHTTP van por Nginx :80 y no cambian.)"
+    read -rp "  Nuevo puerto [1-65535] (Enter = cancelar): " new || return
+    [[ -z "$new" ]] && { echo "  Cancelado."; return; }
+    case "$new" in ""|*[!0-9]*) echo "  El puerto debe ser un número."; return ;; esac
+    new="$((10#$new))"
+    [ "$new" -ge 1 ] && [ "$new" -le 65535 ] || { echo "  El puerto debe estar entre 1 y 65535."; return; }
+    if [[ "$new" == "$cur" ]]; then
+        echo "  Ya está en el puerto $new."
+        return
+    fi
+    if ss -tln 2>/dev/null | awk '{print $4}' | grep -q ":$new$"; then
+        echo "  Aviso: el puerto $new ya está en uso por otro servicio."
+        read -rp "  ¿Seguir de todos modos? [s/N]: " c || return
+        [[ "$c" == "s" || "$c" == "S" ]] || { echo "  Cancelado."; return; }
+    fi
+    tmp="$(mktemp)"
+    cp "$XRAY_CONF" "$XRAY_CONF.bak"
+    if ! jq --argjson port "$new" \
+        '.inbounds |= map(if .streamSettings.security == "reality" then .port = $port else . end)' \
+        "$XRAY_CONF" > "$tmp" 2>/dev/null; then
+        echo "  No se pudo editar la configuración."
+        rm -f "$tmp"; return
+    fi
+    mv "$tmp" "$XRAY_CONF"
+    if [[ -x "$XRAY_BIN" ]]; then
+        if ! "$XRAY_BIN" run -test -config "$XRAY_CONF" >/dev/null 2>&1; then
+            mv "$XRAY_CONF.bak" "$XRAY_CONF"
+            echo "  La configuración nueva no pasó la prueba de Xray; se restauró la anterior."
+            return
+        fi
+    fi
+    mkdir -p /etc/mustafa/ports
+    echo "$new" > /etc/mustafa/ports/v2ray
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl restart xray 2>/dev/null || echo "  (no se pudo reiniciar xray — revisa su estado)"
+        sleep 1
+        if systemctl is-active --quiet xray 2>/dev/null && ss -tln 2>/dev/null | awk '{print $4}' | grep -q ":$new$"; then
+            echo
+            printf '  Puerto de VLESS Reality cambiado: %s -> %b%s%b\n' "$cur" "$C_GREEN_B" "$new" "$C_RESET"
+            echo "  Los enlaces Reality ahora usan el puerto $new (míralos con [1])."
+        else
+            echo "  Xray se reinició pero no se ve escuchando en :$new. Revisa: journalctl -u xray -n 30"
+        fi
+    fi
+}
+
+# [9] Modificar el UUID de un usuario existente. Se puede escribir uno
+# nuevo o dejarlo vacío para generar uno aleatorio. El UUID se cambia
+# en todos los inbounds; si era el UUID principal, se actualiza
+# /etc/mustafa/info para que [1] lo siga marcando como principal.
+v2ray_edit_uuid() {
+    local uuids=() i=0 n old new tmp
+    if [[ ! -f "$XRAY_CONF" ]]; then
+        echo "  Xray no está instalado."
+        return
+    fi
+    echo
+    while read -r uuid; do
+        [[ -z "$uuid" ]] && continue
+        i=$((i+1)); uuids+=("$uuid")
+        printf '  [%s] %s\n' "$i" "$uuid"
+    done < <(v2ray_uuids)
+    [[ $i -eq 0 ]] && { echo "  (sin cuentas UUID)"; return; }
+    read -rp "  Número del UUID a modificar: " n || return
+    [[ "$n" =~ ^[0-9]+$ ]] && [[ $n -ge 1 && $n -le $i ]] || { echo "  Número no válido."; return; }
+    old="${uuids[$((n-1))]}"
+    echo
+    echo "  UUID actual: $old"
+    read -rp "  Nuevo UUID (Enter = generar uno aleatorio): " new || return
+    if [[ -z "$new" ]]; then
+        new="$(cat /proc/sys/kernel/random/uuid)"
+        echo "  Generado: $new"
+    else
+        new="$(printf '%s' "$new" | tr -d '[:space:]')"
+        if ! [[ "$new" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "  Formato no válido. Un UUID es 8-4-4-4-12 dígitos hex."
+            echo "  Ej.: 550e8400-e29b-41d4-a716-446655440000"
+            return
+        fi
+    fi
+    if [[ "$new" == "$old" ]]; then
+        echo "  Es el mismo UUID."
+        return
+    fi
+    if v2ray_uuids | grep -qx "$new"; then
+        echo "  Ese UUID ya existe en la configuración."
+        return
+    fi
+    tmp="$(mktemp)"
+    cp "$XRAY_CONF" "$XRAY_CONF.bak"
+    if ! jq --arg old "$old" --arg new "$new" \
+        '.inbounds |= map(.settings.clients |= map(if .id == $old then .id = $new else . end))' \
+        "$XRAY_CONF" > "$tmp" 2>/dev/null; then
+        echo "  No se pudo editar la configuración."
+        rm -f "$tmp"; return
+    fi
+    mv "$tmp" "$XRAY_CONF"
+    if [[ -x "$XRAY_BIN" ]]; then
+        if ! "$XRAY_BIN" run -test -config "$XRAY_CONF" >/dev/null 2>&1; then
+            mv "$XRAY_CONF.bak" "$XRAY_CONF"
+            echo "  La configuración nueva no pasó la prueba de Xray; se restauró la anterior."
+            return
+        fi
+    fi
+    if [[ "$(info_val xray_uuid)" == "$old" ]]; then
+        sed -i "s/^xray_uuid=.*/xray_uuid=$new/" "$INFO_FILE" 2>/dev/null || true
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl restart xray 2>/dev/null || echo "  (no se pudo reiniciar xray — revisa su estado)"
+    fi
+    echo
+    printf '  UUID modificado: %b%s%b\n' "$C_GREEN_B" "$new" "$C_RESET"
+    v2ray_links "$new" "MUSTAFA-MODIFICADO" "$(v2ray_host)" "$(v2ray_elegir_transporte)"
+}
+
 v2ray_restart() {
     local st
     if ! command -v systemctl >/dev/null 2>&1; then
@@ -722,7 +860,7 @@ v2ray_menu() {
             [[ -z "$st" ]] && st="desconocido"
         fi
         printf '%b\n  ============ MENU V2RAY ============\n%b' "$C_CYAN_B" "$C_RESET"
-        printf '  Xray: %s\n' "$st"
+        printf '  Xray: %s   (Reality :%s)\n' "$st" "$(v2ray_reality_port)"
         echo
         printf '  [1] Mostrar cuentas y enlaces\n'
         printf '  [2] Agregar usuario UUID\n'
@@ -731,6 +869,8 @@ v2ray_menu() {
         printf '  [5] Estado de Xray\n'
         printf '  [6] Instalar V2Ray\n'
         printf '  [7] Desinstalar V2Ray\n'
+        printf '  [8] Cambiar puerto Reality\n'
+        printf '  [9] Modificar UUID\n'
         printf '  [0] Volver\n'
         echo
         read -rp "  Seleccione una opción: " opt || return 0
@@ -742,6 +882,8 @@ v2ray_menu() {
             5) v2ray_status; pause ;;
             6) v2ray_install; pause ;;
             7) v2ray_uninstall; pause ;;
+            8) v2ray_port; pause ;;
+            9) v2ray_edit_uuid; pause ;;
             0) return 0 ;;
             *) echo "  Opción no válida: $opt"; sleep 1 ;;
         esac
@@ -1076,17 +1218,19 @@ keygen_menu() {
 }
 
 # --- [05] HERRAMIENTAS ---------------------------------------------------------
-# Fail2Ban + BBR + vnStat + respaldo. El instalador es install/herramientas.sh
-# (se copia a /etc/mustafa/install/ con install.sh) y el respaldo es
-# /usr/local/bin/mustafa-backup.
+# Fail2Ban + BBR + vnStat + respaldo + bot WhatsApp (Knightbot).
+# El instalador es install/herramientas.sh (se copia a /etc/mustafa/install/
+# con install.sh) y el respaldo es /usr/local/bin/mustafa-backup.
+# El bot WhatsApp es install/knightbot.sh (se instala desde este menú).
 herramientas_menu() {
-    local opt st_f2b st_bbr st_vn last_bk
+    local opt st_f2b st_bbr st_vn last_bk st_wa
     while true; do
         clear
-        st_f2b="--"; st_vn="--"; last_bk="ninguno"
+        st_f2b="--"; st_vn="--"; last_bk="ninguno"; st_wa="--"
         if command -v systemctl >/dev/null 2>&1; then
             systemctl is-active --quiet fail2ban 2>/dev/null && st_f2b="ON"
             systemctl is-active --quiet vnstat 2>/dev/null && st_vn="ON"
+            systemctl is-active --quiet knightbot 2>/dev/null && st_wa="ON"
         fi
         st_bbr="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "?")"
         last_bk="$(ls -t /root/mustafa-backup-*.tar.gz 2>/dev/null | head -n 1 || true)"
@@ -1096,11 +1240,16 @@ herramientas_menu() {
         printf '  BBR      : %s\n' "$st_bbr"
         printf '  vnStat   : %s\n' "$st_vn"
         printf '  Respaldo : %s\n' "$last_bk"
+        printf '  Bot WhatsApp: %s\n' "$st_wa"
         echo
         printf '  [1] Instalar herramientas (Fail2Ban + BBR + vnStat + respaldo)\n'
         printf '  [2] Crear respaldo ahora\n'
         printf '  [3] Ver tráfico (vnstat)\n'
         printf '  [4] Ver baneos de Fail2Ban\n'
+        printf '  [5] Instalar bot WhatsApp (Knightbot)\n'
+        printf '  [6] Ver código de pareo del bot\n'
+        printf '  [7] Ver log del bot\n'
+        printf '  [8] Desinstalar bot WhatsApp\n'
         printf '  [0] Volver\n'
         echo
         read -rp "  Seleccione una opción: " opt || return 0
@@ -1126,6 +1275,54 @@ herramientas_menu() {
                 pause ;;
             4)
                 echo; fail2ban-client status sshd 2>/dev/null || echo "  Fail2Ban no está instalado. Corre primero [1]."
+                pause ;;
+            5)
+                if [[ -f "$INSTALL_DIR/knightbot.sh" ]]; then
+                    bash "$INSTALL_DIR/knightbot.sh"
+                else
+                    echo
+                    echo "  No está el instalador $INSTALL_DIR/knightbot.sh."
+                    echo "  Reinstala el menú con install.sh (copia install/ a /etc/mustafa/install/)."
+                fi
+                pause ;;
+            6)
+                echo
+                if systemctl is-active --quiet knightbot 2>/dev/null; then
+                    local code
+                    code="$(journalctl -u knightbot -n 200 -o cat --no-pager 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -oE '[A-Za-z0-9]{4}-[A-Za-z0-9]{4}' | tail -n 1 || true)"
+                    if [[ -n "$code" ]]; then
+                        echo "  Código de pareo: $code"
+                        echo "  En WhatsApp: Ajustes > Dispositivos vinculados > Vincular dispositivo"
+                        echo "  e introduce el código. Caduca en pocos minutos."
+                    elif journalctl -u knightbot -n 100 -o cat --no-pager 2>/dev/null | grep -q "Failed to get pairing code"; then
+                        echo "  El bot no pudo pedir el código (no conecta con WhatsApp)."
+                        echo "  Revisa el log con [7] y tu internet; luego reinicia el servicio:"
+                        echo "    systemctl restart knightbot"
+                    else
+                        echo "  No hay código de pareo reciente."
+                        echo "  Si el bot ya está vinculado, no lo necesita."
+                        echo "  Si no lo está, reinicia el servicio y vuelve aquí:"
+                        echo "    systemctl restart knightbot"
+                    fi
+                else
+                    echo "  El bot no está instalado o no está activo. Corre primero [5]."
+                fi
+                pause ;;
+            7)
+                echo; journalctl -u knightbot -n 40 --no-pager 2>/dev/null || echo "  El bot no está instalado. Corre primero [5]."
+                pause ;;
+            8)
+                echo
+                read -rp "  ¿Desinstalar el bot WhatsApp (se borra la sesión)? [s/N]: " opt2 || opt2=""
+                if [[ "$opt2" == "s" || "$opt2" == "S" ]]; then
+                    if [[ -f "$INSTALL_DIR/knightbot.sh" ]]; then
+                        bash "$INSTALL_DIR/knightbot.sh" --uninstall
+                    else
+                        echo "  No está el instalador $INSTALL_DIR/knightbot.sh."
+                    fi
+                else
+                    echo "  Cancelado."
+                fi
                 pause ;;
             0) return 0 ;;
             *) echo "  Opción no válida: $opt"; sleep 1 ;;
