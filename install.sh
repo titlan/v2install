@@ -179,11 +179,15 @@ ok "Xray instalado en $XRAY_DIR/xray"
 "$XRAY_DIR/xray" version | head -n 1
 
 # --- Claves Reality + UUID del usuario base ----------------------------------
+# 'xray x25519' cambió de formato en las versiones nuevas (v26.x):
+#   nuevo:  PrivateKey: <clave> / Password (PublicKey): <clave> / Hash32: ...
+#   viejo:  Private key: <clave> / Public key: <clave>
+# Se aceptan los dos formatos.
 log "Generando claves Reality y UUID..."
 X25519_OUT="$("$XRAY_DIR/xray" x25519)"
-REALITY_PRIV="$(echo "$X25519_OUT" | awk '/Private key/ {print $3}')"
-REALITY_PUB="$(echo "$X25519_OUT" | awk '/Public key/ {print $3}')"
-[[ -n "$REALITY_PRIV" && -n "$REALITY_PUB" ]] || die "No se pudieron generar las claves Reality."
+REALITY_PRIV="$(echo "$X25519_OUT" | sed -n 's/^PrivateKey: *//p; s/^Private key: *//p' | tr -d '[:space:]')"
+REALITY_PUB="$(echo "$X25519_OUT" | sed -n 's/^Password (PublicKey): *//p; s/^Public key: *//p' | tr -d '[:space:]')"
+[[ -n "$REALITY_PRIV" && -n "$REALITY_PUB" ]] || die "No se pudieron generar las claves Reality (formato de 'xray x25519' no reconocido en Xray $XRAY_TAG)."
 USER_UUID="$(cat /proc/sys/kernel/random/uuid)"
 SHORT_ID="$(openssl rand -hex 4)"
 
