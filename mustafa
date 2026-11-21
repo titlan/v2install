@@ -72,11 +72,36 @@ get_ram_pct() {
     free | awk '/^Mem:/ {printf "%.0f", $3/$2*100}'
 }
 
+es_ip_privada() {
+    # True (0) si la IPv4 es privada (10/8, 172.16/12, 192.168/16) o loopback.
+    local a b
+    a="${1%%.*}"; b="$(echo "$1" | cut -d. -f2)"
+    [[ "$a" == "10" || "$a" == "127" || "$a" == "192" && "$b" == "168" ]] && return 0
+    [[ "$a" == "172" && "$b" -ge 16 && "$b" -le 31 ]] 2>/dev/null && return 0
+    return 1
+}
+
 get_ipv4() {
-    local ip=""
-    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-    if [[ -z "$ip" ]] && command -v curl >/dev/null 2>&1; then
-        ip="$(curl -fsS -m 5 https://ifconfig.me 2>/dev/null || true)"
+    local ip="" tok
+    # Pública primero (ifconfig.me con -4, validando que sea IPv4 y no privada);
+    # si falla, hostname -I saltando privadas (la 172.26.x no sirve en los enlaces).
+    if command -v curl >/dev/null 2>&1; then
+        ip="$(curl -4 -fsS -m 5 https://ifconfig.me 2>/dev/null || true)"
+        case "$ip" in
+            *:*|*[^0-9.]*) ip="" ;;
+            *) if es_ip_privada "$ip"; then ip=""; fi ;;
+        esac
+    fi
+    if [[ -z "$ip" ]]; then
+        for tok in $(hostname -I 2>/dev/null); do
+            case "$tok" in
+                *.*:*|*:*) continue ;;
+            esac
+            if ! es_ip_privada "$tok"; then ip="$tok"; break; fi
+        done
+    fi
+    if [[ -z "$ip" ]]; then
+        ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
     fi
     echo "${ip:-?}"
 }

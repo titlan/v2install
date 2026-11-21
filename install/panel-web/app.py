@@ -180,18 +180,33 @@ def get_domain():
     return d
 
 
+def _es_ip_privada(ip):
+    """True si la IPv4 es privada (10/8, 172.16/12, 192.168/16) o loopback."""
+    p = ip.split(".")
+    if len(p) != 4 or not all(x.isdigit() for x in p):
+        return True
+    a, b = int(p[0]), int(p[1])
+    return a == 10 or a == 127 or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168)
+
+
 def get_ipv4():
-    """IPv4 del VPS: hostname -I primero, si no curl -4 a ifconfig.me."""
+    """IPv4 PÚBLICA del VPS: primero curl -4 a ifconfig.me (validando que sea IPv4);
+    si falla, hostname -I saltando IPs privadas (la privada 172.26.x no sirve en los enlaces)."""
+    rc, out, _ = run(["curl", "-4", "-fsSL", "--max-time", "5",
+                      "https://ifconfig.me"], timeout=10)
+    ip = (out or "").strip()
+    if rc == 0 and ip and ":" not in ip and not _es_ip_privada(ip):
+        return ip
     rc, out, _ = run(["hostname", "-I"], timeout=10)
     if rc == 0:
         for tok in out.split():
-            # Solo IPv4 (con puntos, sin dos puntos).
+            # Solo IPv4 (con puntos, sin dos puntos) y que no sea privada.
+            if "." in tok and ":" not in tok and not _es_ip_privada(tok):
+                return tok
+        # Último recurso: la primera IPv4 aunque sea privada.
+        for tok in out.split():
             if "." in tok and ":" not in tok:
                 return tok
-    rc, out, _ = run(["curl", "-4", "-fsSL", "--max-time", "5",
-                      "https://ifconfig.me"], timeout=10)
-    if rc == 0 and out.strip():
-        return out.strip()
     return "?"
 
 
