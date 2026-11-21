@@ -79,7 +79,7 @@ if [[ -x "$BIN" ]] && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
         info "V2SOCKS ya está instalado y activo."
         info "  Señalización :$SIGNAL_PORT (HTTPS) + WebRTC UDP :$UDP_PORT"
         if [[ -f "$CONF_DIR/password" ]]; then
-            IP="$(curl -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
+            IP="$(curl -4 -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
             info "  Enlace: v2socks://$(cat "$CONF_DIR/password")@${IP:-<IP>}:$SIGNAL_PORT?udp-port=$UDP_PORT&insecure=1"
         fi
         systemctl --no-pager status "$SERVICE" --lines=5 || true
@@ -216,7 +216,7 @@ ss -tln 2>/dev/null | grep -q ":$SIGNAL_PORT " ||
 mkdir -p /etc/mustafa/ports
 echo "$SIGNAL_PORT" > /etc/mustafa/ports/v2socks
 
-IP="$(curl -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
+IP="$(curl -4 -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
 echo
 info "V2SOCKS instalado y corriendo."
 info "  Señalización :$SIGNAL_PORT (HTTPS) + WebRTC UDP :$UDP_PORT"
