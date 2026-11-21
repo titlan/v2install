@@ -1127,6 +1127,68 @@ def api_panel_restart():
     return jsonify({"ok": True})
 
 
+def find_repo_dir():
+    """Localiza el repo v2install clonado en el VPS (normalmente /root/v2install)."""
+    for d in ("/root/v2install", "/home/ubuntu/v2install"):
+        if os.path.isdir(os.path.join(d, ".git")):
+            return d
+    for base in ("/root", "/home"):
+        try:
+            for name in os.listdir(base):
+                d = os.path.join(base, name, "v2install")
+                if os.path.isdir(os.path.join(d, ".git")):
+                    return d
+        except OSError:
+            pass
+    return None
+
+
+@app.route("/api/panel/update-script", methods=["POST"])
+@login_required
+def api_panel_update_script():
+    """Actualiza el script MUSTAFA desde GitHub. Equivale a:
+    cd ~/v2install && git pull && cp -r install/. /etc/mustafa/install/
+    && chmod +x /etc/mustafa/install/*.sh && cp mustafa /usr/local/bin/mustafa.
+    También actualiza los archivos del propio panel y lo reinicia para
+    cargar el app.py nuevo."""
+    repo = find_repo_dir()
+    if not repo:
+        return jsonify({"ok": False, "error": "No se encontró el repo v2install. Clónalo en el VPS con: git clone https://github.com/titlan/v2install.git"}), 404
+    out_lines = []
+    # Rama actual (main) y pull explícito desde origin, para que funcione
+    # aunque la rama local no tenga upstream configurado.
+    rc, branch, _ = run(["git", "-C", repo, "branch", "--show-current"], timeout=30)
+    branch = (branch or "").strip() or "main"
+    rc, out, err = run(["git", "-C", repo, "pull", "origin", branch], timeout=120)
+    out_lines.append("$ git pull origin %s\n" % branch + (out or "") + (err or ""))
+    if rc != 0:
+        return jsonify({"ok": False, "error": "git pull falló", "output": "\n".join(out_lines)}), 500
+    steps = [
+        (["mkdir", "-p", "/etc/mustafa/install"],
+         "mkdir -p /etc/mustafa/install"),
+        (["cp", "-r", os.path.join(repo, "install") + "/.", "/etc/mustafa/install/"],
+         "cp install/ -> /etc/mustafa/install/"),
+        (["bash", "-c", "chmod +x /etc/mustafa/install/*.sh"],
+         "chmod +x /etc/mustafa/install/*.sh"),
+        (["cp", os.path.join(repo, "mustafa"), "/usr/local/bin/mustafa"],
+         "cp mustafa -> /usr/local/bin/mustafa"),
+        (["cp", os.path.join(repo, "install", "panel-web", "app.py"),
+          os.path.join(repo, "install", "panel-web", "index.html"), HERE + "/"],
+         "cp panel-web -> " + HERE),
+    ]
+    for cmd, label in steps:
+        rc, out, err = run(cmd, timeout=60)
+        out_lines.append("$ " + " ".join(cmd) + "\n" + (out or "") + (err or ""))
+        if rc != 0:
+            return jsonify({"ok": False, "error": "Falló: " + label, "output": "\n".join(out_lines)}), 500
+    # Reiniciar el panel para cargar el app.py nuevo (con retraso para
+    # que la respuesta llegue antes de que systemd mate este proceso).
+    def _restart():
+        run(["systemctl", "restart", "panel-web"], timeout=30)
+    threading.Timer(1.0, _restart).start()
+    return jsonify({"ok": True, "output": "\n".join(out_lines), "repo": repo})
+
+
 # --- Arranque -----------------------------------------------------------------------
 
 

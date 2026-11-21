@@ -304,9 +304,11 @@
           <div class="row">
             <button type="submit">Cambiar contraseña</button>
             <button type="button" class="warn" id="btnRestartPanel">Reiniciar panel</button>
+            <button type="button" id="btnUpdateScript">Actualizar script</button>
           </div>
         </form>
-        <p class="muted" style="margin-top:10px">Al reiniciar el panel se cierra esta sesión y hay que volver a entrar.</p>
+        <p class="muted" style="margin-top:10px">Al reiniciar el panel se cierra esta sesión y hay que volver a entrar. Al actualizar el script se baja la última versión de GitHub, se copian los archivos y el panel se reinicia solo.</p>
+        <pre id="updateOutput" class="hidden" style="margin-top:10px"></pre>
       </div>
     </section>
   </div>
@@ -677,6 +679,27 @@ $("#btnRestartPanel").addEventListener("click", async () => {
   try { await api("/api/panel/restart", { method: "POST" }); } catch (e) {}
   toast("El panel se está reiniciando. Vuelve a entrar en unos segundos.");
   setTimeout(showLogin, 1500);
+});
+$("#btnUpdateScript").addEventListener("click", async () => {
+  if (!confirm("¿Actualizar el script MUSTAFA desde GitHub? Se baja la última versión, se copian los archivos y el panel se reinicia.")) return;
+  const btn = $("#btnUpdateScript");
+  const out = $("#updateOutput");
+  btn.disabled = true;
+  btn.textContent = "Actualizando...";
+  out.classList.remove("hidden");
+  out.textContent = "Actualizando el script, espera...";
+  try {
+    const res = await api("/api/panel/update-script", { method: "POST" });
+    out.textContent = res.output || "Script actualizado.";
+    toast("Script actualizado. El panel se reinicia, vuelve a entrar en unos segundos.", "ok");
+    setTimeout(showLogin, 2500);
+  } catch (err) {
+    out.textContent = (err.message || "Error al actualizar.") + (err.output ? "\n" + err.output : "");
+    toast(err.message || "Error al actualizar el script.", "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Actualizar script";
+  }
 });
 
 // ---- Arranque: si hay sesión, entra directo; si no, muestra el login ----
