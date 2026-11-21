@@ -52,6 +52,35 @@ port_actual() {
     [[ -z "$p" ]] && p="8444"
     printf '%s' "$p"
 }
+
+# IP pública IPv4 para anunciar en ICE (SetNAT1To1IPs): sin ella el servidor
+# solo anuncia su IP privada (172.26.x) como candidato ICE y el teléfono no
+# puede abrir el canal WebRTC (UDP 3478) hacia una IP privada.
+es_ip_privada() {
+    local a b
+    a="${1%%.*}"; b="$(echo "$1" | cut -d. -f2)"
+    [[ "$a" == "10" || "$a" == "127" ]] && return 0
+    [[ "$a" == "192" && "$b" == "168" ]] && return 0
+    [[ "$a" == "172" && "$b" -ge 16 && "$b" -le 31 ]] 2>/dev/null && return 0
+    return 1
+}
+ip_publica() {
+    local ip="" tok
+    if command -v curl >/dev/null 2>&1; then
+        ip="$(curl -4 -fsS -m 5 https://ifconfig.me 2>/dev/null || true)"
+        case "$ip" in
+            *:*|*[^0-9.]*) ip="" ;;
+            *) if es_ip_privada "$ip"; then ip=""; fi ;;
+        esac
+    fi
+    if [[ -z "$ip" ]]; then
+        for tok in $(hostname -I 2>/dev/null); do
+            case "$tok" in *:* ) continue ;; esac
+            if ! es_ip_privada "$tok"; then ip="$tok"; break; fi
+        done
+    fi
+    printf '%s' "$ip"
+}
 if [[ -n "$PORT_REQ" ]]; then
     case "$PORT_REQ" in ""|*[!0-9]*) fail "V2SOCKS_PORT debe ser un número entre 1 y 65535." ;; esac
     SIGNAL_PORT="$((10#$PORT_REQ))"
@@ -74,18 +103,25 @@ fi
 
 # --- Idempotencia: si ya está instalado y activo, no se toca nada -----------
 if [[ -x "$BIN" ]] && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
-    # Si se pidió otro puerto, no salir: reconfigurar y reiniciar abajo.
-    if [[ -z "$PORT_REQ" || "$(port_actual)" == "$PORT_REQ" ]]; then
+    # Si se pidió otro puerto, o si el servicio no anuncia la IP pública en ICE
+    # (sin --public-ip solo anuncia la privada y el teléfono no conecta),
+    # no salir: reconfigurar y reiniciar abajo.
+    if { [[ -z "$PORT_REQ" ]] || [[ "$(port_actual)" == "$PORT_REQ" ]]; } && grep -q -- '--public-ip' "/etc/systemd/system/$SERVICE.service" 2>/dev/null; then
         info "V2SOCKS ya está instalado y activo."
         info "  Señalización :$SIGNAL_PORT (HTTPS) + WebRTC UDP :$UDP_PORT"
         if [[ -f "$CONF_DIR/password" ]]; then
-            IP="$(curl -4 -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
+            IP="$(ip_publica)"
+            [[ -z "$IP" ]] && IP="$(hostname -I | awk '{print $1}')"
             info "  Enlace: v2socks://$(cat "$CONF_DIR/password")@${IP:-<IP>}:$SIGNAL_PORT?udp-port=$UDP_PORT&insecure=1"
         fi
         systemctl --no-pager status "$SERVICE" --lines=5 || true
         exit 0
     fi
-    info "Cambiando puerto V2SOCKS de $(port_actual) a $PORT_REQ ..."
+    if [[ -n "$PORT_REQ" && "$(port_actual)" != "$PORT_REQ" ]]; then
+        info "Cambiando puerto V2SOCKS de $(port_actual) a $PORT_REQ ..."
+    else
+        info "V2SOCKS activo pero sin --public-ip: se reconfigura para anunciar la IP pública en ICE ..."
+    fi
 fi
 
 # --- Go ----------------------------------------------------------------------
@@ -187,6 +223,11 @@ else
 fi
 
 # --- Servicio systemd -----------------------------------------------------------
+# La IP pública se anuncia en ICE (--public-ip): sin ella el servidor solo
+# anuncia su IP privada como candidato y el teléfono no abre el canal WebRTC.
+PUBLIC_IP="$(ip_publica)"
+PUBLIC_IP_FLAG=""
+[[ -n "$PUBLIC_IP" ]] && PUBLIC_IP_FLAG="--public-ip $PUBLIC_IP"
 cat > "/etc/systemd/system/$SERVICE.service" <<EOF
 [Unit]
 Description=v2socks server (MUSTAFA, WebRTC data channel -> TCP)
@@ -195,7 +236,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$BIN --password-file $CONF_DIR/password --signal-addr :$SIGNAL_PORT --udp-port $UDP_PORT --cert $CONF_DIR/cert.pem --key $CONF_DIR/key.pem --allow 127.0.0.1:* --allow ::1:*
+ExecStart=$BIN --password-file $CONF_DIR/password --signal-addr :$SIGNAL_PORT --udp-port $UDP_PORT --cert $CONF_DIR/cert.pem --key $CONF_DIR/key.pem $PUBLIC_IP_FLAG --allow 127.0.0.1:* --allow ::1:*
 Restart=on-failure
 RestartSec=3
 
@@ -216,7 +257,8 @@ ss -tln 2>/dev/null | grep -q ":$SIGNAL_PORT " ||
 mkdir -p /etc/mustafa/ports
 echo "$SIGNAL_PORT" > /etc/mustafa/ports/v2socks
 
-IP="$(curl -4 -fsSL --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
+IP="$(ip_publica)"
+[[ -z "$IP" ]] && IP="$(hostname -I | awk '{print $1}')"
 echo
 info "V2SOCKS instalado y corriendo."
 info "  Señalización :$SIGNAL_PORT (HTTPS) + WebRTC UDP :$UDP_PORT"
