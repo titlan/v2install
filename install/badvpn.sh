@@ -13,7 +13,13 @@
 #  - Binario precompilado (amd64): el instalador descarga
 #    install/badvpn-udpgw-amd64.b64 del repo (base64 del binario compilado
 #    de la fuente oficial 1.999.130, SHA-256 verificado) y lo instala en
-#    segundos, sin apt ni compilación.
+#    segundos, sin apt ni compilación. El binario es ESTÁTICO (sin
+#    dependencias dinámicas) para que corra en cualquier glibc: un binario
+#    dinámico compilado contra glibc 2.38 no arranca en Ubuntu 22.04
+#    (glibc 2.35) con "GLIBC_2.38 not found" y el servicio entra en bucle
+#    de reinicios. Después de instalarlo se PRUEBA que realmente corre
+#    (timeout 3s en un puerto de prueba); si no corre, se descarta y se
+#    compila desde fuente, que usa la glibc del sistema.
 #  - Fuente: https://github.com/ambrop72/badvpn (tag 1.999.130, BSD-3-Clause).
 #    El proyecto oficial NO publica binarios precompilados, así que en
 #    arquitecturas que no sean amd64 (o si la descarga del binario falla)
@@ -32,9 +38,11 @@ BADVPN_VERSION="1.999.130"
 BADVPN_URL="https://github.com/ambrop72/badvpn/archive/${BADVPN_VERSION}.tar.gz"
 BADVPN_SHA256="bfd4bbfebd7274bcec792558c9a2fd60e39cd92e04673825ade5d04154766109"
 # Binario precompilado amd64 (base64 en el repo; compilado de la fuente
-# oficial 1.999.130). SHA-256 del binario decodificado.
+# oficial 1.999.130, ESTÁTICO para que corra en cualquier glibc — Ubuntu
+# 22.04 trae 2.35 y un binario dinámico compilado contra 2.38 no arranca
+# ahí con "GLIBC_2.38 not found"). SHA-256 del binario decodificado.
 BADVPN_BIN_URL="https://raw.githubusercontent.com/titlan/v2install/main/install/badvpn-udpgw-amd64.b64"
-BADVPN_BIN_SHA256="cc5b58f797e3a58c507460ab6818ec39dd9e661911c137fb0be51c6037574917"
+BADVPN_BIN_SHA256="26c53f328d233010cc59345789f092bb05aadbb660946e90e40897ab477a06b6"
 BADVPN_BIN="/usr/local/bin/badvpn-udpgw"
 LISTEN_ADDR="127.0.0.1:7300"
 BUILD_DIR="/tmp/badvpn-build"
@@ -115,7 +123,7 @@ fi
 instalar_binario_precompilado() {
     # Devuelve 0 si instaló el binario, 1 si hay que compilar desde fuente.
     [[ "$ARCH" == "x86_64" ]] || return 1
-    log "Descargando badvpn-udpgw precompilado (amd64, 512 KB)..."
+    log "Descargando badvpn-udpgw precompilado (amd64, estático, ~1.6 MB)..."
     local tmp_bin
     tmp_bin="$(mktemp)"
     if ! curl -fsSL -o "$tmp_bin.b64" "$BADVPN_BIN_URL"; then
@@ -135,6 +143,19 @@ instalar_binario_precompilado() {
     fi
     install -m 755 "$tmp_bin" "$BADVPN_BIN"
     rm -f "$tmp_bin" "$tmp_bin.b64"
+    # Probar que el binario realmente corre en este sistema. El binario se
+    # compiló contra una glibc nueva (2.38/2.39); en sistemas con glibc
+    # vieja (Ubuntu 22.04 trae 2.35) falla al arrancar con
+    # "GLIBC_2.38 not found" y el servicio entraría en un bucle de
+    # reinicios. timeout devuelve 124 si el proceso seguía corriendo al
+    # matarlo (bien); cualquier otro código es que el binario no arrancó.
+    local rc=0
+    timeout 3 "$BADVPN_BIN" --listen-addr 127.0.0.1:17300 --max-clients 1 >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" != 124 ]]; then
+        warn "El binario precompilado no corre en este sistema (glibc incompatible, código $rc); se compilará desde fuente."
+        rm -f "$BADVPN_BIN"
+        return 1
+    fi
     ok "badvpn-udpgw precompilado instalado en $BADVPN_BIN"
     return 0
 }
